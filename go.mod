@@ -2,6 +2,8 @@ module github.com/barbarosydev/ai-factory
 
 go 1.27.4
 
+require golang.org/x/net v0.63.0
+
 require (
 	go.temporal.io/sdk/contrib/tools/workflowcheck v0.6.0 // indirect
 	golang.org/x/mod v0.30.0 // indirect
