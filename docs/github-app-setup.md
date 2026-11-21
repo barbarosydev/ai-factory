@@ -6,7 +6,7 @@
 
 1. Open GitHub Settings -> Developer settings -> **GitHub Apps** -> **New GitHub App**.
 2. Set basic details:
-   - **GitHub App name**: `ai-factory` (or a unique name such as `barbarosydev-ai-factory`)
+   - **GitHub App name**: `barbarosydev-ai-factory` (or your own unique app name)
    - **Homepage URL**: `https://github.com/barbarosydev/ai-factory`
    - **Webhook**: Uncheck **Active** (the factory polls GitHub locally over outbound HTTPS; zero inbound ports or tunnels are needed).
 3. Configure **Repository permissions**:
@@ -23,18 +23,16 @@
 
 ## 2. Generate and Store the Private Key in macOS Keychain
 
-1. On the App settings page, scroll to **Private keys** -> click **Generate a private key** (downloads a `.pem` file to `~/Downloads/`).
+1. In the left sidebar of your GitHub App settings, click **Credentials** -> open the **Key pairs** sub-tab (`/settings/apps/<your-app>/key_pairs`) -> click the green **New key** button (downloads `<your-app>.<date>.private-key.pem` to `~/Downloads/`).
 2. Store the Base64-encoded PEM inside macOS Keychain and delete the `.pem` file from disk immediately:
 
    ```bash
-   # Store Base64 PEM in macOS Keychain
+   PEM_FILE="$(ls -t ~/Downloads/*.private-key.pem | head -n1)"
    security add-generic-password -U \
      -a "$USER" \
      -s "ai-factory-github-app-pem" \
-     -w "$(base64 < ~/Downloads/<your-app>.private-key.pem | tr -d '\n')"
-
-   # Permanently remove the downloaded private key file
-   rm -P ~/Downloads/<your-app>.private-key.pem
+     -w "$(base64 < "$PEM_FILE" | tr -d '\n')"
+   rm -P "$PEM_FILE"
    ```
 
 ## 3. Install the App on `ai-factory-websites` Only
@@ -65,4 +63,4 @@ task build
 task doctor
 ```
 
-`task doctor` should report `[PASS] github-app: installation token minted and repository barbarosydev/ai-factory-websites accessible`.
+`task doctor` should report `[PASS] github-app       installation token minted and barbarosydev/ai-factory-websites accessible`.

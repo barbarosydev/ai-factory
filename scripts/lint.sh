@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lint Go, Temporal workflow determinism, shell scripts, JSON/YAML, Conftest policies, and GitHub Actions.
+# Lint Go, Temporal workflow determinism, shell scripts, Python helpers, JSON/YAML, Conftest policies, GitHub Actions, and doc links.
 set -euo pipefail
 
 # shellcheck source=scripts/lib/common.sh
@@ -20,7 +20,7 @@ run() {
 
 tracked() { git ls-files --cached --others --exclude-standard -- "$@"; }
 
-require_cmd go golangci-lint shellcheck jq yq conftest actionlint
+require_cmd go golangci-lint shellcheck ruff jq yq conftest actionlint
 
 # shellcheck disable=SC2317,SC2329
 gofmt_ok() {
@@ -41,6 +41,14 @@ if [[ -n "$shell_files" ]]; then
   run "shellcheck ($(wc -l <<<"$shell_files" | tr -d ' ') files)" shellcheck -x $shell_files
 fi
 
+py_files="$(tracked '*.py')"
+if [[ -n "$py_files" ]]; then
+  # shellcheck disable=SC2086
+  run "ruff check ($(wc -l <<<"$py_files" | tr -d ' ') files)" ruff check --quiet $py_files
+  # shellcheck disable=SC2086
+  run "ruff format --check" ruff format --check --quiet $py_files
+fi
+
 # shellcheck disable=SC2317,SC2329
 yaml_ok() { yq eval 'true' "$1" >/dev/null; }
 while IFS= read -r f; do
@@ -55,5 +63,8 @@ run "conftest verify (policy unit tests)" conftest verify --no-color --policy po
 run "policy: workflows read-only and SHA-pinned" conftest test --no-color --policy policy --namespace github $(tracked '.github/workflows/*.yml')
 run "policy: Claude Code deny rules and guard hooks" conftest test --no-color --policy policy --namespace claude .claude/settings.json
 run "actionlint" actionlint -no-color
+
+run "doc links and paths" "$REPO_ROOT/scripts/lib/check_links.py"
+run "task commands in AGENTS.md and docs/runbook.md" "$REPO_ROOT/scripts/lib/check_commands.py"
 
 exit "$failed"

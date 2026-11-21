@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse hook for Bash: prevent printing Keychain secrets, K8s Secrets, or touching global kubeconfig."""
+
 import json
 import re
 import sys
@@ -8,7 +9,7 @@ import sys
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
         return 0
 
     cmd = (payload.get("tool_input") or {}).get("command") or ""
@@ -24,7 +25,9 @@ def main() -> int:
         return 2
 
     # Block printing Kubernetes Secret values
-    if re.search(r"\bkubectl\b.*\bget\s+secret", cmd) and re.search(r"(-o|--output|jsonpath|go-template|yaml|json)", cmd):
+    if re.search(r"\bkubectl\b.*\bget\s+secret", cmd) and re.search(
+        r"(-o|--output|jsonpath|go-template|yaml|json)", cmd
+    ):
         print(
             "Blocked by .claude/hooks/keychain-kube-guard.py: never print Kubernetes Secret data.",
             file=sys.stderr,
@@ -32,7 +35,9 @@ def main() -> int:
         return 2
 
     # Block touching global ~/.kube/config or kubectx/kubens
-    if re.search(r"\b(kubectx|kubens)\b", cmd) or re.search(r"~/\.kube/config|\$HOME/\.kube/config", cmd):
+    if re.search(r"\b(kubectx|kubens)\b", cmd) or re.search(
+        r"~/\.kube/config|\$HOME/\.kube/config", cmd
+    ):
         print(
             "Blocked by .claude/hooks/keychain-kube-guard.py: never access global ~/.kube/config or switch contexts.",
             file=sys.stderr,

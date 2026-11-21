@@ -4,5 +4,10 @@ bin/
 *.pem
 *.key
 .claude/settings.local.json
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
 .DS_Store
 coverage.out
+*.log

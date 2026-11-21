@@ -28,6 +28,7 @@ expect_hook 2 "keychain-kube-guard.py" "blocks security find-generic-password" '
 expect_hook 2 "keychain-kube-guard.py" "blocks kubectl get secret -o yaml" '{"tool_input":{"command":"kubectl get secret litellm-pm-agent-key -n ai-platform -o yaml"}}'
 expect_hook 2 "keychain-kube-guard.py" "blocks ~/.kube/config access" '{"tool_input":{"command":"cat ~/.kube/config"}}'
 expect_hook 0 "keychain-kube-guard.py" "allows go test" '{"tool_input":{"command":"go test ./..."}}'
+expect_hook 0 "keychain-kube-guard.py" "ignores empty stdin" ''
 
 # secret-guard.sh (assemble fake token at runtime so this test file stays gitleaks-clean)
 fake_pat="ghp_$(openssl rand -hex 18)"
