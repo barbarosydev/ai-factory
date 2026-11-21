@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/barbarosydev/ai-factory/internal/agents/llm"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
 	"github.com/barbarosydev/ai-factory/prompts"
 )
 
-const maxToolTurns = 15
+const maxToolTurns = 10
 
 // HeartbeatFunc is invoked after each model/tool turn so Temporal activities keep heartbeating.
 type HeartbeatFunc func(detail string)
@@ -35,7 +36,7 @@ func NewAgent(client *llm.Client, numCtx int) *Agent {
 	}
 }
 
-// Implement executes the bounded 5-tool Developer loop inside siteDir.
+// Implement executes the bounded Developer tool loop inside siteDir.
 func (a *Agent) Implement(
 	ctx context.Context,
 	task contracts.DeveloperTaskInput,
@@ -57,7 +58,7 @@ func (a *Agent) Implement(
 		{Role: "system", Content: prompts.DevSystem},
 		{
 			Role:    "user",
-			Content: fmt.Sprintf("Implement or update the website for this DeveloperTaskInput:\n\n```json\n%s\n```", string(taskJSON)),
+			Content: fmt.Sprintf("Implement or update the website for this DeveloperTaskInput (prefer `scaffold_site_from_spec` or `write_site_bundle` to complete quickly):\n\n```json\n%s\n```", string(taskJSON)),
 		},
 	}
 
@@ -78,8 +79,8 @@ func (a *Agent) Implement(
 			Model:       a.modelName,
 			Messages:    messages,
 			Tools:       tools,
-			Temperature: 0,
-			MaxTokens:   12288,
+			Temperature: 0.1,
+			MaxTokens:   8192,
 			Options:     map[string]any{"num_ctx": a.numCtx},
 			Tags:        tags,
 		})
@@ -91,10 +92,9 @@ func (a *Agent) Implement(
 		messages = append(messages, assistantMsg)
 
 		if len(assistantMsg.ToolCalls) == 0 {
-			// Nudge the model to use tools/finish if it replied with prose only
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: "Please call the provided tools (`write_file`, `check_site_structure`, `finish`) rather than replying with plain text.",
+				Content: "Call `scaffold_site_from_spec`, `write_site_bundle`, `write_file`, or `finish` rather than replying with plain text.",
 			})
 			continue
 		}
@@ -129,7 +129,6 @@ func (a *Agent) Implement(
 		}
 	}
 
-	// If max turns reached without calling finish, allow Tester to evaluate if index.html exists.
 	if _, err := sandbox.ReadFile("index.html"); err == nil {
 		files := sortedKeys(changedSet)
 		if len(files) == 0 {
@@ -154,6 +153,89 @@ func executeTool(
 	changedSet map[string]bool,
 ) (resultJSON string, didFinish bool, summary string) {
 	switch fn.Name {
+	case "scaffold_site_from_spec":
+		var args struct {
+			AutoFinish *bool  `json:"auto_finish"`
+			Summary    string `json:"summary"`
+		}
+		_ = json.Unmarshal([]byte(fn.Arguments), &args)
+		files, check, err := sandbox.ScaffoldFromSpec(spec)
+		if err != nil {
+			return marshalJSONString(map[string]any{"error": err.Error()}), false, ""
+		}
+		for _, f := range files {
+			changedSet[f] = true
+		}
+		autoFinish := args.AutoFinish == nil || *args.AutoFinish
+		sum := strings.TrimSpace(args.Summary)
+		if sum == "" {
+			sum = fmt.Sprintf("Scaffolded responsive HTML5/CSS/JS website for %s (%d sections).", spec.SiteSlug, len(spec.Sections))
+		}
+		if autoFinish && check.Passed {
+			return marshalJSONString(map[string]any{
+				"status":          "completed",
+				"files_written":   files,
+				"structure_check": check,
+			}), true, sum
+		}
+		return marshalJSONString(map[string]any{
+			"status":          "scaffolded",
+			"files_written":   files,
+			"structure_check": check,
+		}), false, ""
+
+	case "write_site_bundle":
+		var args struct {
+			IndexHTML  string `json:"index_html"`
+			StylesCSS  string `json:"styles_css"`
+			ScriptJS   string `json:"script_js"`
+			Summary    string `json:"summary"`
+			AutoFinish *bool  `json:"auto_finish"`
+		}
+		if err := json.Unmarshal([]byte(fn.Arguments), &args); err != nil {
+			return marshalJSONString(map[string]any{"error": fmt.Sprintf("invalid arguments: %v", err)}), false, ""
+		}
+		var written []string
+		if strings.TrimSpace(args.IndexHTML) != "" {
+			if _, err := sandbox.WriteFile("index.html", args.IndexHTML); err != nil {
+				return marshalJSONString(map[string]any{"error": err.Error()}), false, ""
+			}
+			changedSet["index.html"] = true
+			written = append(written, "index.html")
+		}
+		if strings.TrimSpace(args.StylesCSS) != "" {
+			if _, err := sandbox.WriteFile("styles.css", args.StylesCSS); err != nil {
+				return marshalJSONString(map[string]any{"error": err.Error()}), false, ""
+			}
+			changedSet["styles.css"] = true
+			written = append(written, "styles.css")
+		}
+		if strings.TrimSpace(args.ScriptJS) != "" {
+			if _, err := sandbox.WriteFile("script.js", args.ScriptJS); err != nil {
+				return marshalJSONString(map[string]any{"error": err.Error()}), false, ""
+			}
+			changedSet["script.js"] = true
+			written = append(written, "script.js")
+		}
+		check := sandbox.CheckSiteStructure(spec)
+		autoFinish := args.AutoFinish == nil || *args.AutoFinish
+		sum := strings.TrimSpace(args.Summary)
+		if sum == "" {
+			sum = fmt.Sprintf("Wrote site bundle (%s) for %s.", strings.Join(written, ", "), spec.SiteSlug)
+		}
+		if autoFinish && check.Passed {
+			return marshalJSONString(map[string]any{
+				"status":          "completed",
+				"files_written":   written,
+				"structure_check": check,
+			}), true, sum
+		}
+		return marshalJSONString(map[string]any{
+			"status":          "written",
+			"files_written":   written,
+			"structure_check": check,
+		}), false, ""
+
 	case "list_files":
 		files, err := sandbox.ListFiles()
 		if err != nil {
@@ -229,6 +311,37 @@ func developerTools() []llm.Tool {
 		{
 			Type: "function",
 			Function: llm.FunctionDefinition{
+				Name:        "scaffold_site_from_spec",
+				Description: "High-velocity skill: generate a complete, responsive, accessible HTML5/CSS3/JS website (index.html, styles.css, script.js) from WebsiteSpecification, validate structure, and finish in 1 call.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"auto_finish": map[string]any{"type": "boolean", "description": "Automatically complete implementation if structure validation passes (default true)"},
+						"summary":     map[string]any{"type": "string", "description": "Concise summary of the generated website"},
+					},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llm.FunctionDefinition{
+				Name:        "write_site_bundle",
+				Description: "Batch skill: write index.html, styles.css, and/or script.js in one tool call, validate structure, and finish if valid.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"index_html":  map[string]any{"type": "string", "description": "Complete index.html contents"},
+						"styles_css":  map[string]any{"type": "string", "description": "Complete styles.css contents"},
+						"script_js":   map[string]any{"type": "string", "description": "Optional script.js contents"},
+						"summary":     map[string]any{"type": "string", "description": "Concise summary of changes"},
+						"auto_finish": map[string]any{"type": "boolean", "description": "Finish immediately if structure check passes (default true)"},
+					},
+				},
+			},
+		},
+		{
+			Type: "function",
+			Function: llm.FunctionDefinition{
 				Name:        "list_files",
 				Description: "List existing files inside the target website directory.",
 				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
@@ -267,7 +380,7 @@ func developerTools() []llm.Tool {
 			Type: "function",
 			Function: llm.FunctionDefinition{
 				Name:        "check_site_structure",
-				Description: "Validate index.html HTML5 semantics, required section IDs, internal anchor links, and local asset references.",
+				Description: "Validate index.html HTML5 semantics, required section IDs, required keywords, internal anchor links, and local asset references.",
 				Parameters:  map[string]any{"type": "object", "properties": map[string]any{}},
 			},
 		},

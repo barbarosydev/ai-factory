@@ -80,7 +80,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 	var acts *activities.FactoryActivities
 
 	ghOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 2 * time.Minute,
+		StartToCloseTimeout: 5 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    2 * time.Second,
 			BackoffCoefficient: 2.0,
@@ -89,8 +89,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	pmOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 15 * time.Minute,
-		HeartbeatTimeout:    3 * time.Minute,
+		StartToCloseTimeout: 45 * time.Minute,
+		HeartbeatTimeout:    15 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
@@ -99,8 +99,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	devOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
-		HeartbeatTimeout:    5 * time.Minute,
+		StartToCloseTimeout: 60 * time.Minute,
+		HeartbeatTimeout:    15 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
@@ -109,8 +109,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	testOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 15 * time.Minute,
-		HeartbeatTimeout:    3 * time.Minute,
+		StartToCloseTimeout: 30 * time.Minute,
+		HeartbeatTimeout:    15 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
@@ -119,8 +119,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	revOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 15 * time.Minute,
-		HeartbeatTimeout:    3 * time.Minute,
+		StartToCloseTimeout: 30 * time.Minute,
+		HeartbeatTimeout:    15 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
@@ -129,8 +129,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	mergeOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 15 * time.Minute,
-		HeartbeatTimeout:    2 * time.Minute,
+		StartToCloseTimeout: 30 * time.Minute,
+		HeartbeatTimeout:    10 * time.Minute,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    5 * time.Second,
 			BackoffCoefficient: 2.0,

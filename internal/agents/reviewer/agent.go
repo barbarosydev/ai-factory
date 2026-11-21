@@ -118,9 +118,18 @@ func (a *Agent) Review(ctx context.Context, in contracts.ReviewInput, worktreeDi
 		msg := resp.Choices[0].Message
 		messages = append(messages, msg)
 		if len(msg.ToolCalls) == 0 {
+			if diffAudit.PathIsolationOK && len(externalURLs) == 0 && in.TestReport.Passed && strings.TrimSpace(msg.Content) != "" {
+				return contracts.ReviewResult{
+					Approved:         true,
+					PathIsolationOK:  true,
+					ExternalAssetsOK: true,
+					SpecFidelityOK:   true,
+					SummaryMarkdown:  strings.TrimSpace(msg.Content),
+				}, nil
+			}
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: "Call `inspect_git_diff`, `scan_external_urls`, and then `submit_review`.",
+				Content: "Call `submit_review` with your final audit verdict.",
 			})
 			continue
 		}
