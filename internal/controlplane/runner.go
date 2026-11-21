@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"go.temporal.io/api/enums/v1"
@@ -24,6 +25,7 @@ import (
 	"github.com/barbarosydev/ai-factory/internal/evaluator"
 	"github.com/barbarosydev/ai-factory/internal/githubapp"
 	"github.com/barbarosydev/ai-factory/internal/gitworktree"
+	"github.com/barbarosydev/ai-factory/internal/telemetry"
 	"github.com/barbarosydev/ai-factory/internal/workflow"
 )
 
@@ -64,6 +66,14 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 		return err
 	}
 
+	logger := telemetry.NewLogger(cfg.LogFormat, out)
+	reg := telemetry.NewRegistry()
+	stopMetrics, err := telemetry.StartServer(ctx, cfg.MetricsAddr, reg, logger)
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
+
 	var gitMgr *gitworktree.Manager
 	ghClient, auth, err := newGitHubClient(cfg, func() ([]string, error) {
 		return gitMgr.ListExistingSites()
@@ -74,18 +84,20 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	gitMgr = gitworktree.NewManager(cfg.WebsitesRepoPath, cfg.GitHubAppID, auth.Token)
 	ev := evaluator.NewPlaywrightEvaluator(cfg.WebsitesRepoPath)
 
-	pmAgent := pm.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.PMKey, 30*time.Minute), cfg.NumCtx, gitMgr)
-	devAgent := dev.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.DevKey, 30*time.Minute), cfg.NumCtx)
-	testAgent := tester.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.TestKey, 30*time.Minute), cfg.NumCtx, ev)
-	revAgent := reviewer.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.SecKey, 30*time.Minute), cfg.NumCtx, inspectorAdapter{git: gitMgr, ev: ev})
+	pmAgent := pm.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.PMKey, "pm", reg, logger), cfg.NumCtx, gitMgr)
+	devAgent := dev.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.DevKey, "dev", reg, logger), cfg.NumCtx)
+	testAgent := tester.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.TestKey, "tester", reg, logger), cfg.NumCtx, ev)
+	revAgent := reviewer.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.SecKey, "reviewer", reg, logger), cfg.NumCtx, inspectorAdapter{git: gitMgr, ev: ev})
 
 	acts := &activities.FactoryActivities{
-		PM:       pmAgent,
-		Dev:      devAgent,
-		Tester:   testAgent,
-		Reviewer: revAgent,
-		Git:      gitMgr,
-		GitHub:   ghClient,
+		PM:                pmAgent,
+		Dev:               devAgent,
+		Tester:            testAgent,
+		Reviewer:          revAgent,
+		Git:               gitMgr,
+		GitHub:            ghClient,
+		Metrics:           reg,
+		HeartbeatInterval: cfg.Policy.HeartbeatInterval,
 	}
 
 	tc, err := client.Dial(client.Options{
@@ -98,10 +110,10 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	defer tc.Close()
 
 	// Note: Temporal Go SDK panics if MaxConcurrentWorkflowTaskExecutionSize == 1 because it reserves
-	// a slot for sticky workflow cache tasks. MaxConcurrentActivityExecutionSize = 1 enforces that
-	// at most one LLM / Playwright / Git activity executes at a time on the Mac.
+	// a slot for sticky workflow cache tasks. MaxConcurrentActivityExecutionSize defaults to 1 to keep
+	// at most one LLM / Playwright / Git activity active on the Mac (raise on multi-GPU / AKS workers).
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{
-		MaxConcurrentActivityExecutionSize: 1,
+		MaxConcurrentActivityExecutionSize: cfg.MaxConcurrentActivities,
 	})
 	w.RegisterWorkflow(workflow.IssueFactoryWorkflow)
 	w.RegisterActivity(acts)
@@ -109,15 +121,40 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start temporal worker: %w", err)
 	}
+	reg.SetReady(true)
+	defer reg.SetReady(false)
 	defer w.Stop()
 
-	_, _ = fmt.Fprintf(out, "ai-factory worker started (temporal=%s queue=%s repo=%s/%s mode=%s)\n",
-		cfg.TemporalAddress, cfg.TaskQueue, cfg.GitHubOwner, cfg.GitHubRepo, opts.AutonomyMode)
+	logger.Info("ai-factory worker started",
+		"temporal", cfg.TemporalAddress,
+		"queue", cfg.TaskQueue,
+		"repo", cfg.GitHubOwner+"/"+cfg.GitHubRepo,
+		"mode", opts.AutonomyMode,
+		"max_concurrent_activities", cfg.MaxConcurrentActivities,
+	)
 
 	if opts.Once {
-		return runOnce(ctx, cfg, tc, ghClient, opts, out)
+		return runOnce(ctx, cfg, tc, ghClient, opts, reg, logger, out)
 	}
 	return runPoller(ctx, cfg, tc, ghClient, opts, out)
+}
+
+func observedLLMClient(baseURL, apiKey, role string, reg *telemetry.Registry, logger *slog.Logger) *llm.Client {
+	c := llm.NewClient(baseURL, apiKey, 30*time.Minute)
+	c.SetObserver(func(model string, promptTok, compTok int, d time.Duration, err error) {
+		reg.RecordAgentCall(role, model, promptTok, compTok, d, err)
+		if logger != nil {
+			logger.Info("llm call completed",
+				"role", role,
+				"model", model,
+				"duration_ms", d.Milliseconds(),
+				"prompt_tokens", promptTok,
+				"completion_tokens", compTok,
+				"error", err != nil,
+			)
+		}
+	})
+	return c
 }
 
 func runOnce(
@@ -126,8 +163,11 @@ func runOnce(
 	tc client.Client,
 	ghClient *githubapp.Client,
 	opts RunOptions,
+	reg *telemetry.Registry,
+	logger *slog.Logger,
 	out io.Writer,
 ) error {
+	start := time.Now()
 	var issue contracts.CustomerIssueInput
 	if opts.IssueNumber > 0 {
 		fetched, _, err := ghClient.GetIssue(ctx, opts.IssueNumber)
@@ -173,11 +213,23 @@ func runOnce(
 		case <-ctx.Done():
 			return ctx.Err()
 		case done := <-doneCh:
+			elapsed := time.Since(start)
 			if done.err != nil {
+				reg.RecordWorkflow("failed", elapsed, 0)
 				return fmt.Errorf("workflow %s failed: %w", wfID, done.err)
 			}
-			_, _ = fmt.Fprintf(out, "workflow %s finished: state=%s site=%q attempts=%d merged=%t pr=%s reason=%s\n",
-				wfID, done.res.FinalState, done.res.SiteSlug, done.res.Attempts, done.res.Merged, done.res.PRURL, done.res.Reason)
+			reg.RecordWorkflow(done.res.FinalState, elapsed, done.res.Attempts)
+			if logger != nil {
+				logger.Info("workflow finished",
+					"workflow_id", wfID,
+					"final_state", done.res.FinalState,
+					"site", done.res.SiteSlug,
+					"attempts", done.res.Attempts,
+					"merged", done.res.Merged,
+					"pr_url", done.res.PRURL,
+					"duration_ms", elapsed.Milliseconds(),
+				)
+			}
 			return nil
 		case <-ticker.C:
 			polled, err := ghClient.PollOpenFactoryIssues(ctx)
@@ -344,6 +396,7 @@ func ensureStartedOrSignaled(
 		Issue:        issue,
 		AutonomyMode: opts.AutonomyMode,
 		SkipRemoteCI: opts.SkipRemoteCI,
+		Policy:       cfg.Policy,
 	})
 	if err != nil {
 		return "", err

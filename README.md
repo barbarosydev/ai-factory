@@ -29,6 +29,8 @@ flowchart LR
 
 - **[User & Operator Journey](docs/user-journey.md)** — Customer workflow, operator commands, and verified end-to-end run results
 - **[Architecture](docs/architecture.md)** — Cross-repository system view, state machine, and package map
+- **[Observability, Evals & Configurability](docs/observability-and-evals.md)** — Prometheus `/metrics`, `/healthz`/`/readyz`, token/latency KPIs, and `FACTORY_*` timeout/retry knobs
+- **[Kubernetes & AKS Migration](docs/deployment-k8s-aks.md)** — 12-factor container/probe readiness and multi-GPU cloud scaling path
 - **[Prerequisites](docs/prerequisites.md)** & **[GitHub App Setup](docs/github-app-setup.md)** — Fresh-Mac installation and Keychain setup
 - **[Operations Runbook](docs/runbook.md)** — Daily startup, monitoring (`task status`), and debugging failed snapshots
 - **[AI Agent Harness](docs/harness.md)** — Rules, permissions, Conftest policies, review roles, and tested hooks

@@ -67,10 +67,8 @@ stateDiagram-v2
 | **`internal/agents/{pm,dev,tester,reviewer,llm}`** | Typed contracts & prompts for the 4 independent agents (`pm` normalization + fallback extraction, `dev` `os.OpenRoot` sandbox & scaffold synthesizer, `test` Playwright + DOM bundle, `sec` audit) | [pm.go](../internal/agents/pm/pm.go), [tools.go](../internal/agents/dev/tools.go), [scaffold.go](../internal/agents/dev/scaffold.go), [agent.go](../internal/agents/tester/agent.go), [agent.go](../internal/agents/reviewer/agent.go) |
 | **`internal/gitworktree` & `internal/evaluator`** | Isolated `factory/issue-<N>` worktrees, ephemeral `GIT_ASKPASS` pushes, failed snapshot archival (max 5 kept), Playwright JSON parser & URL scanner | [manager.go](../internal/gitworktree/manager.go), [evaluator.go](../internal/evaluator/evaluator.go) |
 
-## Design & Performance Decisions
+## Design, Observability & Kubernetes Readiness
 
-See [docs/adr/README.md](adr/README.md) for all architecture decision records, especially:
-- [ADR 0001](adr/0001-control-plane-language-and-temporal-topology.md): Go control plane + Temporal host worker concurrency (`MaxConcurrentActivityExecutionSize = 1`).
-- [ADR 0004](adr/0004-github-app-stdlib-auth-and-human-in-the-loop.md): Pure stdlib GitHub App JWT/Keychain auth without webhooks or tokens in Temporal history.
-- [ADR 0005](adr/0005-bounded-self-correction-and-retry-separation.md): Infrastructure retries (`RetryPolicy`) vs bounded 3-attempt semantic self-correction.
-- [ADR 0007](adr/0007-gemma4-structured-json-and-high-velocity-skills.md): Avoiding `gemma4:12b` GBNF grammar stalls, 15s background activity heartbeats, and high-velocity `scaffold_site_from_spec` tooling (~17s combined Dev+Test+Review execution).
+- **[Observability, Configurability & Agent Evals](observability-and-evals.md)** — Prometheus `/metrics`, `/healthz`, `/readyz`, structured `slog` JSON logs, `LiteLLM_SpendLogs` KPIs, and tunable `FACTORY_*` timeout/retry variables.
+- **[Running in Kubernetes / Migrating to AKS](deployment-k8s-aks.md)** — How the stateless Go worker, `/readyz` probes, and `FACTORY_MAX_CONCURRENT_ACTIVITIES` transition cleanly from local macOS host execution to AKS Pods.
+- **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0007`.
