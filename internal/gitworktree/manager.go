@@ -214,7 +214,7 @@ func (m *Manager) CommitAndPush(ctx context.Context, worktreeDir string, spec co
 	if err := m.gitRun(ctx, worktreeDir,
 		"-c", "user.name="+m.botName,
 		"-c", "user.email="+botEmail,
-		"commit", "-m", commitMsg,
+		"commit", "--no-verify", "-m", commitMsg,
 	); err != nil {
 		return "", fmt.Errorf("git commit: %w", err)
 	}

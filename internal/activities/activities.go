@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.temporal.io/sdk/activity"
 
@@ -141,7 +142,8 @@ func (a *FactoryActivities) RunPMAgentActivity(ctx context.Context, issue contra
 	if a.PM == nil {
 		return contracts.PMDecisionOutput{}, fmt.Errorf("pm agent not configured")
 	}
-	activity.RecordHeartbeat(ctx, fmt.Sprintf("pm analyze issue #%d", issue.IssueNumber))
+	stopHB := startHeartbeatLoop(ctx, fmt.Sprintf("pm analyze issue #%d", issue.IssueNumber))
+	defer stopHB()
 	return a.PM.AnalyzeIssue(ctx, issue)
 }
 
@@ -153,11 +155,13 @@ func (a *FactoryActivities) PrepareWorktreeActivity(ctx context.Context, in Prep
 	return a.Git.PrepareWorktree(ctx, in.IssueNumber, in.SiteSlug)
 }
 
-// RunDeveloperAgentActivity runs the bounded 5-tool Developer loop inside the issue worktree.
+// RunDeveloperAgentActivity runs the bounded Developer tool loop inside the issue worktree.
 func (a *FactoryActivities) RunDeveloperAgentActivity(ctx context.Context, in DeveloperActivityInput) (contracts.ImplementationResult, error) {
 	if a.Dev == nil {
 		return contracts.ImplementationResult{}, fmt.Errorf("developer agent not configured")
 	}
+	stopHB := startHeartbeatLoop(ctx, fmt.Sprintf("dev implement %s (attempt %d)", in.Task.Spec.SiteSlug, in.Task.Attempt))
+	defer stopHB()
 	siteDir := gitworktree.SiteDir(in.WorktreeDir, in.Task.Spec.SiteSlug)
 	return a.Dev.Implement(ctx, in.Task, siteDir, func(detail string) {
 		activity.RecordHeartbeat(ctx, detail)
@@ -169,6 +173,8 @@ func (a *FactoryActivities) RunTesterAgentActivity(ctx context.Context, in Teste
 	if a.Tester == nil {
 		return contracts.TestReport{}, fmt.Errorf("tester agent not configured")
 	}
+	stopHB := startHeartbeatLoop(ctx, fmt.Sprintf("tester verify %s (attempt %d)", in.Input.Spec.SiteSlug, in.Input.Attempt))
+	defer stopHB()
 	return a.Tester.Verify(ctx, in.Input, in.WorktreeDir, func(detail string) {
 		activity.RecordHeartbeat(ctx, detail)
 	})
@@ -179,7 +185,8 @@ func (a *FactoryActivities) RunReviewerActivity(ctx context.Context, in Reviewer
 	if a.Reviewer == nil {
 		return contracts.ReviewResult{}, fmt.Errorf("reviewer agent not configured")
 	}
-	activity.RecordHeartbeat(ctx, fmt.Sprintf("reviewing %s", in.Input.Spec.SiteSlug))
+	stopHB := startHeartbeatLoop(ctx, fmt.Sprintf("reviewing %s", in.Input.Spec.SiteSlug))
+	defer stopHB()
 	return a.Reviewer.Review(ctx, in.Input, in.WorktreeDir)
 }
 
@@ -223,4 +230,26 @@ func (a *FactoryActivities) CleanupWorktreeActivity(ctx context.Context, in Clea
 		return fmt.Errorf("git worktree manager not configured")
 	}
 	return a.Git.CleanupWorktree(ctx, in.WorktreeDir, in.IssueNumber, in.SiteSlug, in.Failed, in.Reports)
+}
+
+func startHeartbeatLoop(ctx context.Context, detail string) func() {
+	activity.RecordHeartbeat(ctx, detail)
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				activity.RecordHeartbeat(ctx, detail)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+	}
 }

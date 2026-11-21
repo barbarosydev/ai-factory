@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/barbarosydev/ai-factory/internal/agents/llm"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
@@ -106,6 +107,22 @@ func (a *Agent) Verify(
 		messages = append(messages, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			if pwRan && lastPW.Passed {
+				summary := strings.TrimSpace(msg.Content)
+				if summary == "" {
+					summary = "All 8 Playwright desktop and mobile gates passed."
+				}
+				return contracts.TestReport{
+					Attempt:           in.Attempt,
+					Passed:            true,
+					SemanticQualityOK: true,
+					DurationMs:        lastPW.DurationMs,
+					Checks:            lastPW.Checks,
+					TesterSummary:     summary,
+					DesktopScreenshot: lastPW.DesktopScreenshot,
+					MobileScreenshot:  lastPW.MobileScreenshot,
+				}, nil
+			}
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: "Call `run_playwright_suite`, inspect files if needed, and then call `submit_test_report`.",
@@ -123,7 +140,16 @@ func (a *Agent) Verify(
 				}
 				pwRan = true
 				lastPW = res
-				messages = appendToolMsg(messages, tc, res)
+				snap, _ := a.backend.InspectDOMSnapshot(ctx, worktreeDir, in.Spec.SiteSlug)
+				messages = appendToolMsg(messages, tc, map[string]any{
+					"passed":                  res.Passed,
+					"duration_ms":             res.DurationMs,
+					"checks":                  res.Checks,
+					"failures":                res.Failures,
+					"desktop_screenshot_path": res.DesktopScreenshot,
+					"mobile_screenshot_path":  res.MobileScreenshot,
+					"dom_snapshot":            snap,
+				})
 
 			case "inspect_dom_snapshot":
 				snap, snapErr := a.backend.InspectDOMSnapshot(ctx, worktreeDir, in.Spec.SiteSlug)

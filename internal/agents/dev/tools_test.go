@@ -181,3 +181,44 @@ func TestDeveloperAgentMultiTurnLoop(t *testing.T) {
 		t.Errorf("FilesChanged=%v, want [index.html styles.css]", res.FilesChanged)
 	}
 }
+
+func TestScaffoldSiteFromSpecSkill(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		tc := []llm.ToolCall{
+			{ID: "s1", Type: "function", Function: llm.FunctionCall{Name: "scaffold_site_from_spec", Arguments: `{"auto_finish":true,"summary":"Scaffolded Berlin coffee shop"}`}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-scaffold",
+			"choices": []map[string]any{
+				{"index": 0, "message": map[string]any{"role": "assistant", "tool_calls": tc}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	spec := testSpec()
+	spec.Sections[0].RequiredKeywords = []string{"Kreuzberg", "Specialty"}
+	spec.Sections[1].RequiredKeywords = []string{"Espresso", "Flat White"}
+	spec.Sections[1].RequiredElements = []string{"h2", "ul", "table"}
+
+	client := llm.NewClient(srv.URL, "sk-dev-test", 5*time.Second)
+	agent := NewAgent(client, 32768)
+
+	res, err := agent.Implement(context.Background(), contracts.DeveloperTaskInput{
+		IssueNumber: 5,
+		Attempt:     1,
+		Spec:        spec,
+	}, filepath.Join(t.TempDir(), "kaffeekultur-berlin"), nil)
+	if err != nil {
+		t.Fatalf("Implement with scaffold_site_from_spec failed: %v", err)
+	}
+	if res.TurnsUsed != 1 {
+		t.Errorf("TurnsUsed=%d, want 1", res.TurnsUsed)
+	}
+	if len(res.FilesChanged) != 3 {
+		t.Errorf("FilesChanged=%v, want [index.html script.js styles.css]", res.FilesChanged)
+	}
+}

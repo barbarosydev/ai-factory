@@ -77,10 +77,10 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	ghClient := githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, gitMgr.ListExistingSites)
 	ev := evaluator.NewPlaywrightEvaluator(cfg.WebsitesRepoPath)
 
-	pmAgent := pm.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.PMKey, 15*time.Minute), cfg.NumCtx, gitMgr)
-	devAgent := dev.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.DevKey, 20*time.Minute), cfg.NumCtx)
-	testAgent := tester.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.TestKey, 15*time.Minute), cfg.NumCtx, ev)
-	revAgent := reviewer.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.SecKey, 10*time.Minute), cfg.NumCtx, inspectorAdapter{git: gitMgr, ev: ev})
+	pmAgent := pm.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.PMKey, 30*time.Minute), cfg.NumCtx, gitMgr)
+	devAgent := dev.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.DevKey, 30*time.Minute), cfg.NumCtx)
+	testAgent := tester.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.TestKey, 30*time.Minute), cfg.NumCtx, ev)
+	revAgent := reviewer.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.SecKey, 30*time.Minute), cfg.NumCtx, inspectorAdapter{git: gitMgr, ev: ev})
 
 	acts := &activities.FactoryActivities{
 		PM:       pmAgent,
@@ -100,9 +100,11 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	}
 	defer tc.Close()
 
+	// Note: Temporal Go SDK panics if MaxConcurrentWorkflowTaskExecutionSize == 1 because it reserves
+	// a slot for sticky workflow cache tasks. MaxConcurrentActivityExecutionSize = 1 enforces that
+	// at most one LLM / Playwright / Git activity executes at a time on the Mac.
 	w := worker.New(tc, cfg.TaskQueue, worker.Options{
-		MaxConcurrentActivityExecutionSize:     1,
-		MaxConcurrentWorkflowTaskExecutionSize: 1,
+		MaxConcurrentActivityExecutionSize: 1,
 	})
 	w.RegisterWorkflow(workflow.IssueFactoryWorkflow)
 	w.RegisterActivity(acts)
