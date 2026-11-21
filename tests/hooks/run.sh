@@ -27,8 +27,21 @@ expect_hook() {
 expect_hook 2 "keychain-kube-guard.py" "blocks security find-generic-password" '{"tool_input":{"command":"security find-generic-password -s ai-factory-github-app-pem -w"}}'
 expect_hook 2 "keychain-kube-guard.py" "blocks kubectl get secret -o yaml" '{"tool_input":{"command":"kubectl get secret litellm-pm-agent-key -n ai-platform -o yaml"}}'
 expect_hook 2 "keychain-kube-guard.py" "blocks ~/.kube/config access" '{"tool_input":{"command":"cat ~/.kube/config"}}'
+expect_hook 2 "keychain-kube-guard.py" "blocks reading .env files" '{"tool_input":{"command":"cat .env.local"}}'
 expect_hook 0 "keychain-kube-guard.py" "allows go test" '{"tool_input":{"command":"go test ./..."}}'
 expect_hook 0 "keychain-kube-guard.py" "ignores empty stdin" ''
+
+# gofmt.sh
+expect_hook 0 "gofmt.sh" "ignores non-Go files" '{"tool_input":{"file_path":"README.md"}}'
+tmp_go="$(mktemp -t gofmt-hook-XXXXXX).go"
+trap 'rm -f "$tmp_go"' EXIT
+printf 'package main\nfunc  x( )  {}\n' >"$tmp_go"
+expect_hook 0 "gofmt.sh" "formats Go file on edit" "{\"tool_input\":{\"file_path\":\"$tmp_go\"}}"
+if grep -q 'func x() {}' "$tmp_go"; then
+  pass "gofmt.sh" "reformatted whitespace"
+else
+  fail "gofmt.sh" "did not format temp Go file"
+fi
 
 # secret-guard.sh (assemble fake token at runtime so this test file stays gitleaks-clean)
 fake_pat="ghp_$(openssl rand -hex 18)"

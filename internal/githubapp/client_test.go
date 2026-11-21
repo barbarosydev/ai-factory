@@ -244,6 +244,9 @@ func TestGitHubControllerWorkflowAndPoller(t *testing.T) {
 				"sha":     "mergedsha999",
 				"message": "Pull Request successfully merged",
 			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/repos/barbarosydev/ai-factory-websites/git/refs/heads/factory/issue-10":
+			addedLabels = append(addedLabels, "branch-deleted")
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -332,4 +335,5 @@ func TestGitHubControllerWorkflowAndPoller(t *testing.T) {
 	require.True(t, mergedPR)
 	require.Equal(t, "mergedsha999", mergeRes.SHA)
 	require.GreaterOrEqual(t, heartbeats, 2)
+	require.Contains(t, addedLabels, "branch-deleted")
 }

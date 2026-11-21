@@ -64,17 +64,14 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 		return err
 	}
 
-	auth, err := githubapp.NewInstallationAuth(cfg.GitHubAppID, cfg.GitHubInstallationID, cfg.GitHubAppPEMBase64, "", nil)
+	var gitMgr *gitworktree.Manager
+	ghClient, auth, err := newGitHubClient(cfg, func() ([]string, error) {
+		return gitMgr.ListExistingSites()
+	})
 	if err != nil {
-		return fmt.Errorf("init github app auth: %w", err)
+		return err
 	}
-	gh, err := githubapp.NewGitHubClient(auth)
-	if err != nil {
-		return fmt.Errorf("init github client: %w", err)
-	}
-
-	gitMgr := gitworktree.NewManager(cfg.WebsitesRepoPath, cfg.GitHubAppID, auth.Token)
-	ghClient := githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, gitMgr.ListExistingSites)
+	gitMgr = gitworktree.NewManager(cfg.WebsitesRepoPath, cfg.GitHubAppID, auth.Token)
 	ev := evaluator.NewPlaywrightEvaluator(cfg.WebsitesRepoPath)
 
 	pmAgent := pm.NewAgent(llm.NewClient(cfg.LiteLLMBaseURL, cfg.PMKey, 30*time.Minute), cfg.NumCtx, gitMgr)

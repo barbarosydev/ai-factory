@@ -15,7 +15,6 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"github.com/barbarosydev/ai-factory/internal/config"
-	"github.com/barbarosydev/ai-factory/internal/githubapp"
 )
 
 // CheckResult represents one diagnostic probe in factory doctor.
@@ -248,15 +247,10 @@ func checkGitHubApp(ctx context.Context, cfg config.Config, strict bool) CheckRe
 		}
 	}
 
-	auth, err := githubapp.NewInstallationAuth(cfg.GitHubAppID, cfg.GitHubInstallationID, cfg.GitHubAppPEMBase64, "", nil)
-	if err != nil {
-		return CheckResult{Name: "github-app", Status: "FAIL", Detail: fmt.Sprintf("parse private key: %v", err)}
-	}
-	gh, err := githubapp.NewGitHubClient(auth)
+	ghClient, _, err := newGitHubClient(cfg, nil)
 	if err != nil {
 		return CheckResult{Name: "github-app", Status: "FAIL", Detail: err.Error()}
 	}
-	ghClient := githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, nil)
 
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

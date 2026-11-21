@@ -91,3 +91,61 @@ func TestAnalyzeIssueRetriesInvalidOutputThenPasses(t *testing.T) {
 		t.Fatalf("unexpected output: %+v", out)
 	}
 }
+
+func TestAnalyzeIssueNormalizesTopLevelSpecAndReasoningFallback(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Simulate model returning top-level fields and section "title" instead of "heading" inside reasoning_content.
+		fallbackJSON := `{
+			"status": "ready",
+			"site_slug": "Nord Studio Berlin!!",
+			"page_title": "Nord Studio Berlin",
+			"sections": [
+				{"id": "Hero", "title": "Welcome", "required_keywords": ["Nord"]},
+				{"id": "Portfolio", "title": "Selected Work", "required_keywords": ["Editorial"]},
+				{"id": "Contact", "title": "Book a Session", "required_keywords": ["Berlin"]}
+			]
+		}`
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-pm-norm",
+			"choices": []map[string]any{
+				{
+					"index": 0,
+					"message": map[string]any{
+						"role":              "assistant",
+						"content":           "",
+						"reasoning_content": "Here is the decision JSON:\n```json\n" + fallbackJSON + "\n```",
+					},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := llm.NewClient(srv.URL, "sk-pm-test", 5*time.Second)
+	agent := NewAgent(client, 32768, nil)
+
+	out, err := agent.AnalyzeIssue(context.Background(), contracts.CustomerIssueInput{
+		IssueNumber: 77,
+		IssueTitle:  "[New Site]: Photography Portfolio",
+		IssueBody:   "Build a photography portfolio.",
+		RequestType: "new_website",
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeIssue normalization failed: %v", err)
+	}
+	if out.Spec == nil {
+		t.Fatal("expected normalized spec")
+	}
+	if out.Spec.SiteSlug != "nord-studio-berlin" {
+		t.Errorf("SiteSlug=%q, want nord-studio-berlin", out.Spec.SiteSlug)
+	}
+	if out.Spec.SchemaVersion != "v1" || len(out.Spec.Navigation) != 3 {
+		t.Errorf("unexpected normalized metadata: schema=%s nav=%d", out.Spec.SchemaVersion, len(out.Spec.Navigation))
+	}
+	if out.Spec.Sections[0].Heading != "Welcome" || out.Spec.Sections[1].ID != "portfolio" {
+		t.Errorf("unexpected normalized sections: %+v", out.Spec.Sections)
+	}
+}
