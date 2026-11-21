@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Lint Go, Temporal workflow determinism, shell scripts, JSON/YAML, Conftest policies, and GitHub Actions.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+cd "$REPO_ROOT"
+
+failed=0
+run() {
+  local name="$1"
+  shift
+  if "$@"; then
+    printf '%sPASS%s  %s\n' "$C_GREEN" "$C_RESET" "$name"
+  else
+    printf '%sFAIL%s  %s\n' "$C_RED" "$C_RESET" "$name"
+    failed=1
+  fi
+}
+
+tracked() { git ls-files --cached --others --exclude-standard -- "$@"; }
+
+require_cmd go golangci-lint shellcheck jq yq conftest actionlint
+
+# shellcheck disable=SC2317,SC2329
+gofmt_ok() {
+  local bad
+  bad="$(gofmt -l .)"
+  [[ -z "$bad" ]] || { echo "gofmt needed on: $bad" >&2; return 1; }
+}
+run "gofmt" gofmt_ok
+run "go vet" go vet ./...
+run "golangci-lint" golangci-lint run ./...
+if go list -m all | grep -q 'go.temporal.io/sdk'; then
+  run "temporal workflowcheck" go tool workflowcheck ./...
+fi
+
+shell_files="$(tracked '*.sh')"
+if [[ -n "$shell_files" ]]; then
+  # shellcheck disable=SC2086
+  run "shellcheck ($(wc -l <<<"$shell_files" | tr -d ' ') files)" shellcheck -x $shell_files
+fi
+
+# shellcheck disable=SC2317,SC2329
+yaml_ok() { yq eval 'true' "$1" >/dev/null; }
+while IFS= read -r f; do
+  [[ -n "$f" ]] && run "json $f" jq empty "$f"
+done <<<"$(tracked '*.json')"
+while IFS= read -r f; do
+  [[ -n "$f" ]] && run "yaml $f" yaml_ok "$f"
+done <<<"$(tracked '*.yml' '*.yaml')"
+
+run "conftest verify (policy unit tests)" conftest verify --no-color --policy policy
+# shellcheck disable=SC2046
+run "policy: workflows read-only and SHA-pinned" conftest test --no-color --policy policy --namespace github $(tracked '.github/workflows/*.yml')
+run "policy: Claude Code deny rules and guard hooks" conftest test --no-color --policy policy --namespace claude .claude/settings.json
+run "actionlint" actionlint -no-color
+
+exit "$failed"

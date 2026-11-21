@@ -1,0 +1,58 @@
+# Thin task runner: every task calls one script in scripts/, where the logic lives.
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  build:
+    desc: Compile ./bin/factory
+    cmds:
+      - ./scripts/build.sh
+
+  doctor:
+    desc: Verify Go toolchain, ai-factory-infra connectivity, Keychain PEM, and ai-factory-websites readiness
+    cmds:
+      - ./scripts/doctor.sh {{.CLI_ARGS}}
+
+  run:
+    desc: Run the Temporal worker and GitHub Issue Poller in human-review mode
+    cmds:
+      - ./scripts/run.sh --mode review {{.CLI_ARGS}}
+
+  run:auto:
+    desc: Run the Temporal worker and GitHub Issue Poller in autonomous merge mode
+    cmds:
+      - ./scripts/run.sh --mode auto {{.CLI_ARGS}}
+
+  run:once:
+    desc: "Process at most one eligible factory:ready issue and exit (e.g. task run:once -- --issue 42)"
+    cmds:
+      - ./scripts/run.sh --once {{.CLI_ARGS}}
+
+  status:
+    desc: Show active Temporal workflows, loaded Ollama models, and open factory:* issues
+    cmds:
+      - ./scripts/status.sh
+
+  clean:failed:
+    desc: Remove archived .worktrees/issue-*-failed-* snapshots in ai-factory-websites and prune stale worktrees
+    cmds:
+      - ./scripts/clean-failed.sh
+
+  lint:
+    desc: Run gofmt, go vet, golangci-lint, workflowcheck, shellcheck, JSON/YAML, Conftest policies, and actionlint
+    cmds:
+      - ./scripts/lint.sh
+
+  test:
+    desc: Run Go unit, Temporal workflow replay, tool sandbox, and git worktree tests
+    cmds:
+      - ./scripts/test.sh {{.CLI_ARGS}}
+
+  ci:
+    desc: Run task lint, task test, and gitleaks secret scan (pre-commit and GitHub Actions)
+    cmds:
+      - ./scripts/ci.sh {{.CLI_ARGS}}
