@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/barbarosydev/ai-factory/internal/config"
+	"github.com/barbarosydev/ai-factory/internal/controlplane"
+	"github.com/barbarosydev/ai-factory/internal/gitworktree"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: factory <doctor|run|once|status>")
+		fmt.Fprintln(os.Stderr, "usage: factory <doctor|run|once|status|clean-failed> [flags]")
 		os.Exit(2)
 	}
 
@@ -19,15 +25,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	switch os.Args[1] {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	cmd := os.Args[1]
+	args := os.Args[2:]
+
+	switch cmd {
 	case "doctor":
-		fmt.Printf("ai-factory config ok (temporal=%s litellm=%s repo=%s)\n",
-			cfg.TemporalAddress, cfg.LiteLLMBaseURL, cfg.WebsitesRepoPath)
-	case "run", "once", "status":
-		fmt.Fprintf(os.Stderr, "subcommand %q is scheduled for Phases 5-6\n", os.Args[1])
-		os.Exit(1)
+		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+		strictGitHub := fs.Bool("strict-github", false, "fail if GitHub App credentials are missing")
+		_ = fs.Parse(args)
+
+		if !controlplane.RunDoctor(ctx, cfg, "", *strictGitHub, os.Stdout) {
+			os.Exit(1)
+		}
+
+	case "run":
+		fs := flag.NewFlagSet("run", flag.ExitOnError)
+		mode := fs.String("mode", string(cfg.AutonomyMode), "autonomy mode (review or auto)")
+		skipRemoteCI := fs.Bool("skip-remote-ci", cfg.SkipRemoteCI, "skip polling remote GitHub Check Runs in auto mode")
+		once := fs.Bool("once", false, "process at most one issue and exit when finished")
+		issue := fs.Int("issue", 0, "target GitHub issue number (optional with --once)")
+		_ = fs.Parse(args)
+
+		if err := controlplane.Run(ctx, cfg, controlplane.RunOptions{
+			AutonomyMode: config.AutonomyMode(*mode),
+			SkipRemoteCI: *skipRemoteCI,
+			Once:         *once,
+			IssueNumber:  *issue,
+		}, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "run error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "once":
+		fs := flag.NewFlagSet("once", flag.ExitOnError)
+		mode := fs.String("mode", string(cfg.AutonomyMode), "autonomy mode (review or auto)")
+		skipRemoteCI := fs.Bool("skip-remote-ci", cfg.SkipRemoteCI, "skip polling remote GitHub Check Runs in auto mode")
+		issue := fs.Int("issue", 0, "target GitHub issue number (defaults to oldest factory:ready issue)")
+		_ = fs.Parse(args)
+
+		if err := controlplane.Run(ctx, cfg, controlplane.RunOptions{
+			AutonomyMode: config.AutonomyMode(*mode),
+			SkipRemoteCI: *skipRemoteCI,
+			Once:         true,
+			IssueNumber:  *issue,
+		}, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "once error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "status":
+		if err := controlplane.PrintStatus(ctx, cfg, "", os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "status error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "clean-failed":
+		mgr := gitworktree.NewManager(cfg.WebsitesRepoPath, 0, nil)
+		removed, err := mgr.CleanFailedSnapshots(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "clean-failed error: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("removed %d archived failed snapshot(s) in %s\n", removed, cfg.WebsitesRepoPath)
+
 	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand %q\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "unknown subcommand %q (expected doctor, run, once, status, clean-failed)\n", cmd)
 		os.Exit(2)
 	}
 }
