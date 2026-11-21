@@ -89,12 +89,16 @@ type ChatResponse struct {
 	} `json:"usage"`
 }
 
+// CompletionObserver receives timing, token usage, and error telemetry for each gateway call.
+type CompletionObserver func(model string, promptTokens, completionTokens int, duration time.Duration, err error)
+
 // Client is a minimal HTTP client for the LiteLLM OpenAI-compatible gateway.
 // Each agent constructs or calls a Client scoped to its own virtual API key.
 type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+	observer   CompletionObserver
 }
 
 // NewClient constructs a LiteLLM client for a single agent route key.
@@ -109,6 +113,11 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
 			Timeout: timeout,
 		},
 	}
+}
+
+// SetObserver installs a telemetry callback invoked after every ChatCompletion attempt.
+func (c *Client) SetObserver(fn CompletionObserver) {
+	c.observer = fn
 }
 
 // ChatCompletion executes a POST /chat/completions call against LiteLLM.
@@ -135,26 +144,41 @@ func (c *Client) ChatCompletion(ctx context.Context, req ChatRequest) (ChatRespo
 		httpReq.Header.Set("X-Litellm-Tag", strings.Join(req.Tags, ","))
 	}
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		c.notify(req.Model, 0, 0, time.Since(start), err)
 		return ChatResponse{}, fmt.Errorf("litellm request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
+		c.notify(req.Model, 0, 0, time.Since(start), err)
 		return ChatResponse{}, fmt.Errorf("read litellm response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return ChatResponse{}, fmt.Errorf("litellm returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		statusErr := fmt.Errorf("litellm returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		c.notify(req.Model, 0, 0, time.Since(start), statusErr)
+		return ChatResponse{}, statusErr
 	}
 
 	var parsed ChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		c.notify(req.Model, 0, 0, time.Since(start), err)
 		return ChatResponse{}, fmt.Errorf("decode litellm response: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return ChatResponse{}, fmt.Errorf("litellm returned zero choices")
+		emptyErr := fmt.Errorf("litellm returned zero choices")
+		c.notify(req.Model, parsed.Usage.PromptTokens, parsed.Usage.CompletionTokens, time.Since(start), emptyErr)
+		return ChatResponse{}, emptyErr
 	}
+	c.notify(req.Model, parsed.Usage.PromptTokens, parsed.Usage.CompletionTokens, time.Since(start), nil)
 	return parsed, nil
+}
+
+func (c *Client) notify(model string, promptTokens, completionTokens int, d time.Duration, err error) {
+	if c.observer != nil {
+		c.observer(model, promptTokens, completionTokens, d, err)
+	}
 }

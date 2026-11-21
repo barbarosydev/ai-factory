@@ -249,4 +249,32 @@ func TestWorkflowRejectionAndRepairExhaustion(t *testing.T) {
 	if res2.FinalState != "failed" || !failedArchiveCalled || res2.Attempts != 3 {
 		t.Fatalf("expected failed after 3 attempts with archive, got res=%+v failedArchiveCalled=%t", res2, failedArchiveCalled)
 	}
+
+	// 3. Custom configurable MaxRepairAttempts = 1
+	var suite3 testsuite.WorkflowTestSuite
+	env3 := suite3.NewTestWorkflowEnvironment()
+	a3 := registerBaseActivities(env3)
+	env3.OnActivity(a3.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
+	env3.OnActivity(a3.RunPMAgentActivity, mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil)
+	env3.OnActivity(a3.PrepareWorktreeActivity, mock.Anything, mock.Anything).Return("/tmp/wt/issue-46", nil)
+	env3.OnActivity(a3.RunDeveloperAgentActivity, mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
+	env3.OnActivity(a3.RunTesterAgentActivity, mock.Anything, mock.Anything).Return(contracts.TestReport{
+		Attempt:  1,
+		Passed:   false,
+		Failures: []contracts.FailureEvidence{{CheckName: "missing-section"}},
+	}, nil)
+	env3.OnActivity(a3.CleanupWorktreeActivity, mock.Anything, mock.Anything).Return(nil)
+
+	policy := config.DefaultWorkflowPolicy()
+	policy.MaxRepairAttempts = 1
+	env3.ExecuteWorkflow(IssueFactoryWorkflow, WorkflowInput{
+		Issue:        contracts.CustomerIssueInput{IssueNumber: 46, IssueTitle: "Broken", IssueBody: "Broken"},
+		AutonomyMode: config.AutonomyReview,
+		Policy:       policy,
+	})
+	var res3 WorkflowResult
+	_ = env3.GetWorkflowResult(&res3)
+	if res3.FinalState != "failed" || res3.Attempts != 1 {
+		t.Fatalf("expected failed after custom 1 repair attempt, got %+v", res3)
+	}
 }

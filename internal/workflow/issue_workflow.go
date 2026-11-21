@@ -14,11 +14,8 @@ import (
 )
 
 const (
-	SignalHumanReply       = "human-reply"
-	QueryFactoryStatus     = "factory-status"
-	maxRepairAttempts      = 3
-	maxClarificationRounds = 2
-	humanWaitTimeout       = 7 * 24 * time.Hour
+	SignalHumanReply   = "human-reply"
+	QueryFactoryStatus = "factory-status"
 )
 
 // HumanReplySignal wakes a paused factory:waiting workflow when a human comments or re-labels.
@@ -44,6 +41,7 @@ type WorkflowInput struct {
 	Issue        contracts.CustomerIssueInput `json:"issue"`
 	AutonomyMode config.AutonomyMode          `json:"autonomy_mode"`
 	SkipRemoteCI bool                         `json:"skip_remote_ci"`
+	Policy       config.WorkflowPolicy        `json:"policy"`
 }
 
 // WorkflowResult summarizes the terminal state of an IssueFactoryWorkflow execution.
@@ -77,65 +75,69 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		return WorkflowResult{}, err
 	}
 
+	policy := in.Policy.WithDefaults()
 	var acts *activities.FactoryActivities
 
 	ghOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 5 * time.Minute,
+		StartToCloseTimeout: policy.GitHubTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    2 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    4,
+			MaximumAttempts:    int32(policy.GitHubMaxRetryAttempts),
 		},
 	}
 	pmOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 45 * time.Minute,
-		HeartbeatTimeout:    15 * time.Minute,
+		StartToCloseTimeout: policy.PMTimeout,
+		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    3,
+			MaximumAttempts:    int32(policy.GitHubMaxRetryAttempts - 1),
 		},
 	}
+	if pmOpts.RetryPolicy.MaximumAttempts < 1 {
+		pmOpts.RetryPolicy.MaximumAttempts = 1
+	}
 	devOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 60 * time.Minute,
-		HeartbeatTimeout:    15 * time.Minute,
+		StartToCloseTimeout: policy.DevTimeout,
+		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    2,
+			MaximumAttempts:    int32(policy.AgentMaxRetryAttempts),
 		},
 	}
 	testOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
-		HeartbeatTimeout:    15 * time.Minute,
+		StartToCloseTimeout: policy.TestTimeout,
+		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    2,
+			MaximumAttempts:    int32(policy.AgentMaxRetryAttempts),
 		},
 	}
 	revOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
-		HeartbeatTimeout:    15 * time.Minute,
+		StartToCloseTimeout: policy.ReviewTimeout,
+		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    2,
+			MaximumAttempts:    int32(policy.AgentMaxRetryAttempts),
 		},
 	}
 	mergeOpts := workflow.ActivityOptions{
-		StartToCloseTimeout: 30 * time.Minute,
-		HeartbeatTimeout:    10 * time.Minute,
+		StartToCloseTimeout: policy.MergeTimeout,
+		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
 			InitialInterval:    5 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    3,
+			MaximumAttempts:    int32(policy.GitHubMaxRetryAttempts),
 		},
 	}
 
@@ -161,7 +163,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 	var pmOut contracts.PMDecisionOutput
 	humanReplyCh := workflow.GetSignalChannel(ctx, SignalHumanReply)
 
-	for round := 0; round <= maxClarificationRounds; round++ {
+	for round := 0; round <= policy.MaxClarificationRounds; round++ {
 		status.Stage = "pm_analysis"
 		if err := workflow.ExecuteActivity(pmCtx, acts.RunPMAgentActivity, issue).Get(ctx, &pmOut); err != nil {
 			_ = markFailed(ghCtx, acts, in.Issue.IssueNumber, "PM Agent failed: "+err.Error())
@@ -188,8 +190,8 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 			break
 		}
 
-		if round == maxClarificationRounds {
-			msg := "Clarification still incomplete after 2 human-in-the-loop rounds."
+		if round == policy.MaxClarificationRounds {
+			msg := "Clarification still incomplete after " + strconv.Itoa(policy.MaxClarificationRounds) + " human-in-the-loop rounds."
 			_ = markFailed(ghCtx, acts, in.Issue.IssueNumber, msg)
 			return WorkflowResult{IssueNumber: in.Issue.IssueNumber, FinalState: "failed", Reason: msg}, nil
 		}
@@ -207,7 +209,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		var reply HumanReplySignal
 		var timedOut bool
 		timerCtx, cancelTimer := workflow.WithCancel(ctx)
-		timerFuture := workflow.NewTimer(timerCtx, humanWaitTimeout)
+		timerFuture := workflow.NewTimer(timerCtx, policy.HumanWaitTimeout)
 
 		sel := workflow.NewSelector(ctx)
 		sel.AddReceive(humanReplyCh, func(c workflow.ReceiveChannel, _ bool) {
@@ -221,7 +223,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		sel.Select(ctx)
 
 		if timedOut {
-			msg := "Timed out waiting 7 days for human clarification."
+			msg := "Timed out waiting " + policy.HumanWaitTimeout.String() + " for human clarification."
 			_ = workflow.ExecuteActivity(ghCtx, acts.TransitionIssueStateActivity, activities.IssueTransition{
 				IssueNumber: in.Issue.IssueNumber,
 				RemoveLabel: "factory:waiting",
@@ -281,14 +283,14 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		}).Get(cleanupCtx, nil)
 	}()
 
-	// Bounded Semantic Repair Loop (up to 3 implementation attempts)
+	// Bounded Semantic Repair Loop (up to policy.MaxRepairAttempts)
 	var priorFailures []contracts.FailureEvidence
 	var lastImpl contracts.ImplementationResult
 	var lastReport contracts.TestReport
 	var lastReview contracts.ReviewResult
 	var verified bool
 
-	for attempt := 1; attempt <= maxRepairAttempts; attempt++ {
+	for attempt := 1; attempt <= policy.MaxRepairAttempts; attempt++ {
 		status.Attempt = attempt
 		status.Stage = "dev_attempt_" + strconv.Itoa(attempt)
 
@@ -372,14 +374,14 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 
 	if !verified {
 		status.Stage = "failed"
-		diag := formatFailureComment(spec.SiteSlug, reports, priorFailures)
+		diag := formatFailureComment(spec.SiteSlug, policy.MaxRepairAttempts, reports, priorFailures)
 		_ = markFailed(ghCtx, acts, in.Issue.IssueNumber, diag)
 		return WorkflowResult{
 			IssueNumber: in.Issue.IssueNumber,
 			FinalState:  "failed",
 			SiteSlug:    spec.SiteSlug,
 			Attempts:    status.Attempt,
-			Reason:      "Exhausted 3 bounded repair attempts",
+			Reason:      "Exhausted " + strconv.Itoa(policy.MaxRepairAttempts) + " bounded repair attempts",
 		}, nil
 	}
 
@@ -471,9 +473,9 @@ func markFailed(ghCtx workflow.Context, acts *activities.FactoryActivities, issu
 	}).Get(ghCtx, nil)
 }
 
-func formatFailureComment(slug string, reports []contracts.TestReport, remaining []contracts.FailureEvidence) string {
+func formatFailureComment(slug string, maxAttempts int, reports []contracts.TestReport, remaining []contracts.FailureEvidence) string {
 	var b strings.Builder
-	b.WriteString("AI Software Factory could not verify `sites/" + slug + "/` after " + strconv.Itoa(maxRepairAttempts) + " bounded repair attempt(s).\n\n")
+	b.WriteString("AI Software Factory could not verify `sites/" + slug + "/` after " + strconv.Itoa(maxAttempts) + " bounded repair attempt(s).\n\n")
 	if len(reports) > 0 {
 		b.WriteString("### Attempt Summary\n")
 		for _, r := range reports {
