@@ -5,9 +5,10 @@ Local-first asynchronous multi-agent AI Software Factory powered by Temporal, Li
 ## Architecture
 
 - Control plane & Temporal worker written in Go (`1.27`), running natively on the Mac host (`temporal.localhost:7233`, `http://temporal.localhost:8080`, `http://litellm.localhost:8080/v1`).
-- Strictly 1 concurrent workflow / activity execution (`MaxConcurrentActivityExecutionSize = 1`) to fit comfortably inside the Mac's 36 GB unified memory.
-- Four independent agents with dedicated LiteLLM routes and virtual keys (`pm-agent`, `dev-agent`, `test-agent`, `sec-agent`), connected via typed JSON contracts in `internal/contracts/`.
-- Target websites are built in isolated git worktrees under `../ai-factory-websites/.worktrees/issue-<N>/` on branch `factory/issue-<N>`.
+- Sequential activity execution (`MaxConcurrentActivityExecutionSize = 1`; leaving `MaxConcurrentWorkflowTaskExecutionSize` unset per Go SDK sticky cache requirements) fits comfortably inside the Mac's 36 GB unified memory.
+- Four independent agents with dedicated LiteLLM routes and scoped virtual keys (`pm-agent`, `dev-agent`, `test-agent`, `sec-agent`), connected via typed JSON contracts in `internal/contracts/`.
+- Developer Agent edits stay jailed to `.worktrees/issue-<N>/sites/<slug>/` via `os.OpenRoot`, using high-velocity scaffolding (`scaffold_site_from_spec`, `write_site_bundle`) and granular file/structure tools.
+- Long-running agent activities emit periodic 15-second Temporal heartbeats (`startHeartbeatLoop`) and enforce bounded self-correction (max 3 attempts).
 
 ## Commands
 
@@ -20,9 +21,9 @@ Use `task` for everything; logic lives in `scripts/`.
 | `task run` | Start worker + poller in `review` mode |
 | `task run:auto` | Start worker + poller in `auto` mode (checks + squash merge) |
 | `task run:once` | Process a single issue and exit |
-| `task status` | Show Temporal workflow state and loaded Ollama models |
+| `task status` | Show Temporal workflow state, loaded Ollama models, and open `factory:*` issues |
 | `task clean:failed` | Remove archived `.worktrees/issue-*-failed-*` folders |
-| `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, policies, `actionlint` |
+| `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, policies, `actionlint`, doc checks |
 | `task test` | Go unit, Temporal workflow replay, sandbox escape, and worktree tests |
 | `task ci` | `task lint`, `task test`, and `gitleaks` |
 
@@ -46,5 +47,5 @@ Use `task` for everything; logic lives in `scripts/`.
 ## Definition of done
 
 - `task ci` passes cleanly (0 failures, `gitleaks` clean).
-- Docs/ADRs are updated when architecture, pins, or commands change.
+- Docs/ADRs are updated when architecture, pins, or commands change (`check_links.py` & `check_commands.py` enforce sync).
 - Stop at an open pull request; never merge your own PR.

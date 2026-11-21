@@ -41,38 +41,10 @@ func main() {
 			os.Exit(1)
 		}
 
-	case "run":
-		fs := flag.NewFlagSet("run", flag.ExitOnError)
-		mode := fs.String("mode", string(cfg.AutonomyMode), "autonomy mode (review or auto)")
-		skipRemoteCI := fs.Bool("skip-remote-ci", cfg.SkipRemoteCI, "skip polling remote GitHub Check Runs in auto mode")
-		once := fs.Bool("once", false, "process at most one issue and exit when finished")
-		issue := fs.Int("issue", 0, "target GitHub issue number (optional with --once)")
-		_ = fs.Parse(args)
-
-		if err := controlplane.Run(ctx, cfg, controlplane.RunOptions{
-			AutonomyMode: config.AutonomyMode(*mode),
-			SkipRemoteCI: *skipRemoteCI,
-			Once:         *once,
-			IssueNumber:  *issue,
-		}, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "run error: %v\n", err)
-			os.Exit(1)
-		}
-
-	case "once":
-		fs := flag.NewFlagSet("once", flag.ExitOnError)
-		mode := fs.String("mode", string(cfg.AutonomyMode), "autonomy mode (review or auto)")
-		skipRemoteCI := fs.Bool("skip-remote-ci", cfg.SkipRemoteCI, "skip polling remote GitHub Check Runs in auto mode")
-		issue := fs.Int("issue", 0, "target GitHub issue number (defaults to oldest factory:ready issue)")
-		_ = fs.Parse(args)
-
-		if err := controlplane.Run(ctx, cfg, controlplane.RunOptions{
-			AutonomyMode: config.AutonomyMode(*mode),
-			SkipRemoteCI: *skipRemoteCI,
-			Once:         true,
-			IssueNumber:  *issue,
-		}, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "once error: %v\n", err)
+	case "run", "once":
+		opts := parseRunOptions(cmd, cfg, args, cmd == "once")
+		if err := controlplane.Run(ctx, cfg, opts, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "%s error: %v\n", cmd, err)
 			os.Exit(1)
 		}
 
@@ -94,5 +66,20 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand %q (expected doctor, run, once, status, clean-failed)\n", cmd)
 		os.Exit(2)
+	}
+}
+
+func parseRunOptions(name string, cfg config.Config, args []string, defaultOnce bool) controlplane.RunOptions {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	mode := fs.String("mode", string(cfg.AutonomyMode), "autonomy mode (review or auto)")
+	skipRemoteCI := fs.Bool("skip-remote-ci", cfg.SkipRemoteCI, "skip polling remote GitHub Check Runs in auto mode")
+	once := fs.Bool("once", defaultOnce, "process at most one issue and exit when finished")
+	issue := fs.Int("issue", 0, "target GitHub issue number (optional with --once)")
+	_ = fs.Parse(args)
+	return controlplane.RunOptions{
+		AutonomyMode: config.AutonomyMode(*mode),
+		SkipRemoteCI: *skipRemoteCI,
+		Once:         *once,
+		IssueNumber:  *issue,
 	}
 }

@@ -1,35 +1,67 @@
 # ai-factory
 
-Local-first, asynchronous multi-agent AI Software Factory powered by Temporal, LiteLLM, Ollama (`gemma4`), and Go.
+A local-first, durable, asynchronous **AI Software Factory** built with **Go**, **Temporal**, **LiteLLM**, **Ollama (`gemma4`)**, **Playwright**, and **GitHub Apps** — sized to run reliably on a 36 GB Apple Silicon Mac with zero external LLM API keys.
 
-## Architecture
+Customer requests enter as structured GitHub Issues on [`barbarosydev/ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites), flow through four independent local agents inside isolated git worktrees, verify desktop/mobile rendering across 8 Playwright gates, pause durably for human clarification when needed, and publish portfolio Pull Requests with inline screenshots (or autonomously squash-merge once GitHub Actions pass).
 
-- **Orchestrator**: Temporal Go SDK (`go.temporal.io/sdk`) worker running on the Mac host against `temporal.localhost:7233` (`MaxConcurrentActivityExecutionSize = 1`).
-- **Four Independent Agents**:
-  - `pm-agent` (`gemma4:12b`): Translates GitHub Issues into structured `WebsiteSpecification` JSON Schemas, rejects out-of-scope requests (`factory:rejected`), or pauses durably for human clarification (`factory:waiting`).
-  - `dev-agent` (`gemma4:e4b`): Implements or modifies plain HTML5/CSS/JS websites inside an isolated git worktree (`.worktrees/issue-<N>/sites/<slug>/`) via a bounded 5-tool loop.
-  - `test-agent` (`gemma4:e4b`): Independently executes the shared `@playwright/test` suite in `../ai-factory-websites`, inspects rendered DOM/screenshots, and produces structured `FailureEvidence` for bounded repair (up to 3 attempts).
-  - `sec-agent` (`gemma4:e4b`): Audits git diff path isolation, verifies external network isolation, checks specification fidelity, and composes the portfolio Pull Request report.
-- **Target Repo**: [`barbarosydev/ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites)
-- **Platform Infra**: [`barbarosydev/ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra)
+```mermaid
+flowchart LR
+  ISS["GitHub Issue (factory:ready)"] --> POLL["Go Poller & Temporal (1 active)"]
+  POLL --> PM["pm-agent (gemma4:12b)"]
+  PM -->|needs_clarification| WAIT["factory:waiting -> Human Comment Signal"]
+  WAIT --> PM
+  PM -->|out of scope| REJ["factory:rejected"]
+  PM -->|WebsiteSpecification| DEV["dev-agent (gemma4:e4b, os.OpenRoot)"]
+  DEV --> TEST["test-agent + 8 Playwright Gates"]
+  TEST -->|up to 3 bounded repairs| DEV
+  TEST --> SEC["sec-agent Audit"]
+  SEC --> PR["Open PR + Desktop/Mobile Screenshots -> review or auto-merge"]
+```
 
-## Prerequisites
+## Portfolio Highlights
 
-See [docs/prerequisites.md](docs/prerequisites.md), [docs/github-app-setup.md](docs/github-app-setup.md), [docs/architecture.md](docs/architecture.md), [docs/runbook.md](docs/runbook.md), and [docs/harness.md](docs/harness.md). From a fresh clone:
+- **Durable Multi-Agent Orchestration**: Deterministic Temporal workflow ([issue_workflow.go](internal/workflow/issue_workflow.go), `go tool workflowcheck` clean) separating technical retries (`RetryPolicy`), 15s background heartbeats, durable 7-day human clarification sleeps (`SignalHumanReply`), and bounded 3-attempt semantic self-correction.
+- **Hard Security & Sandbox Boundaries**: Zero host shell tool exposed to LLMs; Developer file mutations are confined at the OS kernel level via Go's `os.OpenRoot` ([tools.go](internal/agents/dev/tools.go)); secrets exist solely at process `exec` time from K8s Secrets and macOS Keychain (never stored on disk, in Temporal history, or in prompts).
+- **Zero-Dependency GitHub App Auth**: Pure Go stdlib `crypto/rsa` RS256 App JWT minting + 1-hour installation token cache ([auth.go](internal/githubapp/auth.go)) driving `go-github/v93`, ephemeral `GIT_ASKPASS` pushes, Checks API polling, and merged branch cleanup.
+- **Grounded Evaluation & Empirical Optimization**: Shared `@playwright/test` verification across desktop (`1280x800`) and mobile (`375x812`) with zero external network access allowed; high-velocity spec scaffolding and empirical `gemma4:12b` JSON reliability improvements documented in [ADR 0007](docs/adr/0007-gemma4-structured-json-and-high-velocity-skills.md).
+
+## Documentation
+
+- **[User & Operator Journey](docs/user-journey.md)** — Customer workflow, operator commands, and verified end-to-end run results
+- **[Architecture](docs/architecture.md)** — Cross-repository system view, state machine, and package map
+- **[Prerequisites](docs/prerequisites.md)** & **[GitHub App Setup](docs/github-app-setup.md)** — Fresh-Mac installation and Keychain setup
+- **[Operations Runbook](docs/runbook.md)** — Daily startup, monitoring (`task status`), and debugging failed snapshots
+- **[AI Agent Harness](docs/harness.md)** — Rules, permissions, Conftest policies, review roles, and tested hooks
+- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0007`
+
+## Ecosystem Repositories
+
+| Repository | Role |
+| --- | --- |
+| **[`ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra)** | Local platform infrastructure (k3d, CloudNativePG PostgreSQL 18, Temporal, LiteLLM, Ollama Metal GPU, Terraform/Helm) |
+| **`ai-factory`** *(this repo)* | Go control plane, Temporal workers, 4 agents, Git worktree manager, Playwright bridge, GitHub App poller, CLI |
+| **[`ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites)** | Target website monorepo (`sites/<slug>/`), root Playwright verification harness, GitHub Issue Forms & Actions CI |
+
+## Quickstart
+
+From a fresh clone (with `../ai-factory-infra` running via `task up` and GitHub App Keychain configured):
 
 ```bash
 brew bundle --no-upgrade
 mise install
 pre-commit install
+
+task build
+task doctor
+task run        # human-review mode (factory:review)
+# or: task run:auto
 ```
 
-## Commands
+## Key Commands
 
-- `task doctor`: Verify Go toolchain, `ai-factory-infra` connectivity, macOS Keychain GitHub App PEM, and `ai-factory-websites` Playwright readiness.
-- `task build`: Build `./bin/factory`.
-- `task run`: Run the Temporal worker + GitHub Issue Poller in human-review mode (`factory:review`).
-- `task run:auto`: Run in autonomous mode (waits for PR CI checks via GitHub Checks API, then squash-merges and labels `factory:done`).
-- `task run:once`: Process at most one eligible `factory:ready` issue and exit cleanly.
-- `task status`: Inspect active Temporal workflows, loaded Ollama models, and open `factory:*` issues.
+- `task doctor`: Verify Go toolchain, `ai-factory-infra`, GitHub App Keychain auth, and `ai-factory-websites` Playwright readiness.
+- `task build`: Compile `./bin/factory`.
+- `task run` / `task run:auto` / `task run:once`: Run the worker + FIFO GitHub poller in `review`, `auto`, or single-issue mode.
+- `task status`: Inspect active/recent Temporal workflows, Ollama VRAM models, and open `factory:*` issues.
 - `task clean:failed`: Remove archived `.worktrees/issue-*-failed-*` snapshots in `../ai-factory-websites`.
-- `task ci`: Run all linters (`gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, Conftest `policy/`, `actionlint`, doc checks), unit/workflow/sandbox tests, and `gitleaks`.
+- `task ci`: Run all linters (`gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, Conftest `policy/`, `actionlint`, doc/command drift checks), unit/workflow/sandbox/hook tests, and `gitleaks`.

@@ -14,7 +14,6 @@ import (
 	"go.temporal.io/sdk/client"
 
 	"github.com/barbarosydev/ai-factory/internal/config"
-	"github.com/barbarosydev/ai-factory/internal/githubapp"
 	"github.com/barbarosydev/ai-factory/internal/workflow"
 )
 
@@ -120,17 +119,11 @@ func printGitHubIssueSummary(ctx context.Context, cfg config.Config, out io.Writ
 		return
 	}
 
-	auth, err := githubapp.NewInstallationAuth(cfg.GitHubAppID, cfg.GitHubInstallationID, cfg.GitHubAppPEMBase64, "", nil)
+	client, _, err := newGitHubClient(cfg, nil)
 	if err != nil {
-		_, _ = fmt.Fprintf(out, "  auth error: %v\n", err)
+		_, _ = fmt.Fprintf(out, "  github error: %v\n", err)
 		return
 	}
-	gh, err := githubapp.NewGitHubClient(auth)
-	if err != nil {
-		_, _ = fmt.Fprintf(out, "  client error: %v\n", err)
-		return
-	}
-	client := githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, nil)
 
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

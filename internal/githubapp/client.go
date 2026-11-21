@@ -408,6 +408,9 @@ func (c *Client) mergePullRequest(ctx context.Context, req activities.MergeReque
 		CommentBody: fmt.Sprintf("Merged PR #%d (`%s`). %s", req.PRNumber, res.GetSHA(), commentDetail),
 	})
 
+	// Best-effort cleanup of merged remote branch so factory/issue-* branches do not accumulate.
+	_, _ = c.gh.Git.DeleteRef(ctx, c.owner, c.repo, fmt.Sprintf("heads/factory/issue-%d", req.IssueNumber))
+
 	return activities.MergeResult{
 		Merged: true,
 		SHA:    res.GetSHA(),
