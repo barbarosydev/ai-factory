@@ -134,7 +134,7 @@ func TestDeveloperAgentMultiTurnLoop(t *testing.T) {
 			})
 			argsCSS, _ := json.Marshal(map[string]string{
 				"path":    "styles.css",
-				"content": `body { margin: 0; font-family: sans-serif; }`,
+				"content": `:root { --primary: #4A2C2A; --bg: #FAF7F2; } body { margin: 0; color: var(--primary); background: var(--bg); font-family: sans-serif; } header, main, footer { padding: 1.5rem; max-width: 72rem; margin: 0 auto; } nav a { color: var(--primary); }`,
 			})
 			tc = []llm.ToolCall{
 				{ID: "c1", Type: "function", Function: llm.FunctionCall{Name: "write_file", Arguments: string(argsHTML)}},

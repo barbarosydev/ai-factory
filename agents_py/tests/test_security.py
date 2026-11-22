@@ -146,5 +146,17 @@ def test_check_site_structure_enforces_charset_and_utf8_footer(tmp_path: pathlib
         "index.html",
         sb.read_file("index.html").replace("Oranienstrañe", "Oranienstraße"),
     )
+    sb.write_file("styles.css", "/* wiped */")
+    res_wiped = check_site_structure(sb, spec)
+    assert not res_wiped.passed
+    assert any("too minimal" in err for err in res_wiped.errors)
+
+    sb.write_file(
+        "styles.css",
+        ":root { --primary: #2C1A12; --bg: #FAF6F0; } "
+        "body { margin: 0; color: var(--primary); background: var(--bg); font-family: system-ui; } "
+        "header, main, footer { padding: 1.5rem; max-width: 72rem; margin: 0 auto; } "
+        "nav a { color: var(--primary); text-decoration: none; }",
+    )
     res_ok = check_site_structure(sb, spec)
     assert res_ok.passed, res_ok.errors

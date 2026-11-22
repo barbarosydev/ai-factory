@@ -114,7 +114,12 @@ async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None
             args = json.dumps(
                 {
                     "index_html": html,
-                    "styles_css": "body { margin: 0; font-family: system-ui, sans-serif; }",
+                    "styles_css": (
+                        ":root { --primary: #2C1A12; --bg: #FAF6F0; } "
+                        "body { margin: 0; font-family: system-ui, sans-serif; color: var(--primary); background: var(--bg); } "
+                        "header, main, footer { padding: 1.5rem; max-width: 72rem; margin: 0 auto; } "
+                        "nav a { color: var(--primary); margin-right: 1rem; }"
+                    ),
                     "summary": "Built authentic coffee shop page",
                 }
             )

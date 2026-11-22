@@ -224,6 +224,16 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 		if externalCSSURLPattern.MatchString(css) {
 			errs = append(errs, "styles.css contains an external http(s):// url(...); remove external URLs")
 		}
+		if len(strings.TrimSpace(css)) < 200 || strings.Count(css, "{") < 3 {
+			errs = append(errs, "styles.css is missing or too minimal (<200 bytes or <3 CSS rules); preserve existing CSS or write full responsive rules")
+		}
+		cssLower := strings.ToLower(css)
+		if spec.Theme.PrimaryColor != "" && !strings.Contains(cssLower, strings.ToLower(spec.Theme.PrimaryColor)) {
+			errs = append(errs, fmt.Sprintf("styles.css must apply spec.theme.primary_color (%s) in CSS variables or rules", spec.Theme.PrimaryColor))
+		}
+		if spec.Theme.BackgroundColor != "" && !strings.Contains(cssLower, strings.ToLower(spec.Theme.BackgroundColor)) {
+			errs = append(errs, fmt.Sprintf("styles.css must apply spec.theme.background_color (%s) in CSS variables or rules", spec.Theme.BackgroundColor))
+		}
 	}
 
 	doc, err := html.Parse(bytes.NewBufferString(rawHTML))
