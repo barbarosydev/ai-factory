@@ -128,6 +128,8 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	logger.Info("ai-factory worker started",
 		"temporal", cfg.TemporalAddress,
 		"queue", cfg.TaskQueue,
+		"agent_runtime", cfg.AgentRuntime,
+		"agent_queue", cfg.AgentTaskQueue,
 		"repo", cfg.GitHubOwner+"/"+cfg.GitHubRepo,
 		"mode", opts.AutonomyMode,
 		"max_concurrent_activities", cfg.MaxConcurrentActivities,
@@ -436,15 +438,21 @@ func ensureStartedOrSignaled(
 		return runID, nil
 	}
 
+	agentQueue := ""
+	if cfg.AgentRuntime == "pydanticai" {
+		agentQueue = cfg.AgentTaskQueue
+	}
+
 	run, err := tc.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:                    wfID,
 		TaskQueue:             cfg.TaskQueue,
 		WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 	}, workflow.IssueFactoryWorkflow, workflow.WorkflowInput{
-		Issue:        issue,
-		AutonomyMode: opts.AutonomyMode,
-		SkipRemoteCI: opts.SkipRemoteCI,
-		Policy:       cfg.Policy,
+		Issue:          issue,
+		AutonomyMode:   opts.AutonomyMode,
+		SkipRemoteCI:   opts.SkipRemoteCI,
+		Policy:         cfg.Policy,
+		AgentTaskQueue: agentQueue,
 	})
 	if err != nil {
 		return "", err

@@ -109,6 +109,8 @@ type Config struct {
 	TemporalAddress         string
 	TemporalNamespace       string
 	TaskQueue               string
+	AgentRuntime            string
+	AgentTaskQueue          string
 	LiteLLMBaseURL          string
 	WebsitesRepoPath        string
 	GitHubOwner             string
@@ -138,6 +140,8 @@ func LoadFromEnv() (Config, error) {
 		TemporalAddress:         envOr("FACTORY_TEMPORAL_ADDRESS", "temporal.localhost:7233"),
 		TemporalNamespace:       envOr("FACTORY_TEMPORAL_NAMESPACE", "default"),
 		TaskQueue:               envOr("FACTORY_TASK_QUEUE", "ai-factory-v1"),
+		AgentRuntime:            strings.ToLower(envOr("FACTORY_AGENT_RUNTIME", "pydanticai")),
+		AgentTaskQueue:          envOr("FACTORY_AGENT_TASK_QUEUE", "ai-factory-agents"),
 		LiteLLMBaseURL:          strings.TrimRight(envOr("FACTORY_LITELLM_URL", "http://litellm.localhost:8080/v1"), "/"),
 		WebsitesRepoPath:        envOr("FACTORY_WEBSITES_REPO", "../ai-factory-websites"),
 		GitHubOwner:             envOr("FACTORY_GITHUB_OWNER", "barbarosydev"),
@@ -230,6 +234,12 @@ func LoadFromEnv() (Config, error) {
 	}
 	if cfg.LogFormat != "text" && cfg.LogFormat != "json" {
 		return Config{}, fmt.Errorf("invalid FACTORY_LOG_FORMAT %q: must be text or json", cfg.LogFormat)
+	}
+	if cfg.AgentRuntime != "pydanticai" && cfg.AgentRuntime != "go" {
+		return Config{}, fmt.Errorf("invalid FACTORY_AGENT_RUNTIME %q: must be pydanticai or go", cfg.AgentRuntime)
+	}
+	if cfg.AgentRuntime == "pydanticai" && strings.TrimSpace(cfg.AgentTaskQueue) == "" {
+		return Config{}, errors.New("FACTORY_AGENT_TASK_QUEUE must not be empty when FACTORY_AGENT_RUNTIME=pydanticai")
 	}
 	if len(cfg.AllowedGitHubUsers) == 0 {
 		return Config{}, errors.New("FACTORY_ALLOWED_GITHUB_USERS must contain at least one GitHub username")

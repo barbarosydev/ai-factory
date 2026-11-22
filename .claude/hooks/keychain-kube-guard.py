@@ -45,9 +45,7 @@ def main() -> int:
         return 2
 
     # Block reading secret .env files via shell commands
-    if re.search(
-        r"\b(cat|head|tail|less|more|grep|awk|sed)\b[^;&|\n]*(\.env\b|\.env\.)", cmd
-    ):
+    if re.search(r"\b(cat|head|tail|less|more|grep|awk|sed)\b[^;&|\n]*(\.env\b|\.env\.)", cmd):
         print(
             "Blocked by .claude/hooks/keychain-kube-guard.py: never read .env files via shell commands.",
             file=sys.stderr,

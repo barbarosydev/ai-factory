@@ -54,3 +54,8 @@ When the PM Agent detects missing facts or contradictory requirements:
 ## GitHub Actions CI Note (`auto` mode)
 
 When running `task run:auto -- --skip-remote-ci`, the factory skips polling GitHub Checks API and squash-merges immediately after local Playwright + Reviewer approval. Use `--skip-remote-ci` only when remote GitHub Actions runners are unavailable or intentionally bypassed.
+
+## Agent Runtime Toggle (`pydanticai` vs `go`)
+
+- By default (`FACTORY_AGENT_RUNTIME=pydanticai`), `task run` / `task run:once` starts both the Go control-plane worker and the Python `agents_py` PydanticAI + MCP activity worker on `FACTORY_AGENT_TASK_QUEUE=ai-factory-agents` (see [ADR 0008](adr/0008-polyglot-pydanticai-and-mcp-agent-runtime.md)).
+- To fall back to the legacy Go-native LLM activities without changing workflows, run with `FACTORY_AGENT_RUNTIME=go task run` (or `FACTORY_AGENT_RUNTIME=go task run:once -- --issue 42`).

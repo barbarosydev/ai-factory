@@ -305,6 +305,10 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 				errs = append(errs, fmt.Sprintf("section #%s is missing required_keyword %q", sec.ID, kw))
 			}
 		}
+		purposeNorm := strings.Join(strings.Fields(strings.ToLower(sec.Purpose)), " ")
+		if len(purposeNorm) >= 25 && strings.Contains(strings.Join(strings.Fields(secLower), " "), purposeNorm) {
+			errs = append(errs, fmt.Sprintf("section #%s leaked spec.purpose instruction verbatim (%q); replace it with authentic user-facing website copy", sec.ID, sec.Purpose))
+		}
 	}
 
 	var checkLinks func(*html.Node)

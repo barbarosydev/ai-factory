@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (amended by [ADR 0008](0008-polyglot-pydanticai-and-mcp-agent-runtime.md))
 
 ## Date
 
