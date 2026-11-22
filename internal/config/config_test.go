@@ -17,10 +17,12 @@ func TestLoadFromEnvDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("FACTORY_LOG_FORMAT", "JSON")
 	t.Setenv("FACTORY_METRICS_ADDR", ":9091")
 	t.Setenv("FACTORY_MAX_CONCURRENT_ACTIVITIES", "2")
+	t.Setenv("FACTORY_ALLOWED_GITHUB_USERS", " BarbarosYdev , alice ")
 
 	cfg, err := LoadFromEnv()
 	require.NoError(t, err)
 	require.Equal(t, AutonomyAuto, cfg.AutonomyMode)
+	require.Equal(t, []string{"barbarosydev", "alice"}, cfg.AllowedGitHubUsers)
 	require.Equal(t, 5, cfg.Policy.MaxRepairAttempts)
 	require.Equal(t, 3, cfg.Policy.MaxClarificationRounds)
 	require.Equal(t, 24*time.Hour, cfg.Policy.HumanWaitTimeout)

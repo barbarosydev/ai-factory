@@ -53,7 +53,16 @@ func ParseIssueForm(
 
 // ExtractClarifications separates authentic human replies from factory/bot comments
 // and identifies the newest human reply posted after the latest clarification prompt.
-func ExtractClarifications(comments []contracts.IssueComment) ([]contracts.IssueComment, *contracts.IssueComment) {
+// When allowedUsers is non-empty, only comments authored by allowlisted GitHub users are accepted.
+func ExtractClarifications(comments []contracts.IssueComment, allowedUsers ...string) ([]contracts.IssueComment, *contracts.IssueComment) {
+	allowedSet := make(map[string]bool, len(allowedUsers))
+	for _, u := range allowedUsers {
+		clean := strings.ToLower(strings.TrimSpace(u))
+		if clean != "" {
+			allowedSet[clean] = true
+		}
+	}
+
 	var human []contracts.IssueComment
 	sawPrompt := false
 	var latestAfterPrompt *contracts.IssueComment
@@ -67,6 +76,9 @@ func ExtractClarifications(comments []contracts.IssueComment) ([]contracts.Issue
 			continue
 		}
 		if strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		if len(allowedSet) > 0 && !allowedSet[strings.ToLower(strings.TrimSpace(c.Author))] {
 			continue
 		}
 		human = append(human, c)

@@ -71,3 +71,4 @@ All repair caps, wait timeouts, activity timeouts, heartbeat intervals, and work
 | `FACTORY_MAX_CONCURRENT_ACTIVITIES` | `1` | Worker activity concurrency (`1` for 36 GB Mac; raise on multi-GPU / AKS) |
 | `FACTORY_METRICS_ADDR` | `127.0.0.1:9091` | HTTP bind address for `/healthz`, `/readyz`, `/metrics` (`off` to disable) |
 | `FACTORY_LOG_FORMAT` | `text` | Structured `log/slog` format (`text` or `json`) |
+| `FACTORY_ALLOWED_GITHUB_USERS` | `barbarosydev` | Comma-separated GitHub usernames permitted to trigger issues or send clarification replies |

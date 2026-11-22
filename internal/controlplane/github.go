@@ -16,5 +16,7 @@ func newGitHubClient(cfg config.Config, existingSites func() ([]string, error)) 
 	if err != nil {
 		return nil, nil, fmt.Errorf("init github client: %w", err)
 	}
-	return githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, existingSites), auth, nil
+	c := githubapp.NewClient(gh, auth, cfg.GitHubOwner, cfg.GitHubRepo, existingSites)
+	c.SetAllowedUsers(cfg.AllowedGitHubUsers)
+	return c, auth, nil
 }

@@ -113,6 +113,7 @@ type Config struct {
 	WebsitesRepoPath        string
 	GitHubOwner             string
 	GitHubRepo              string
+	AllowedGitHubUsers      []string
 	GitHubAppID             int64
 	GitHubInstallationID    int64
 	AutonomyMode            AutonomyMode
@@ -141,6 +142,7 @@ func LoadFromEnv() (Config, error) {
 		WebsitesRepoPath:        envOr("FACTORY_WEBSITES_REPO", "../ai-factory-websites"),
 		GitHubOwner:             envOr("FACTORY_GITHUB_OWNER", "barbarosydev"),
 		GitHubRepo:              envOr("FACTORY_GITHUB_REPO", "ai-factory-websites"),
+		AllowedGitHubUsers:      parseCSVAllowlist(envOr("FACTORY_ALLOWED_GITHUB_USERS", "barbarosydev")),
 		AutonomyMode:            AutonomyMode(envOr("FACTORY_AUTONOMY_MODE", string(AutonomyReview))),
 		SkipRemoteCI:            os.Getenv("FACTORY_SKIP_REMOTE_CI") == "1" || strings.EqualFold(os.Getenv("FACTORY_SKIP_REMOTE_CI"), "true"),
 		PollIntervalSeconds:     envIntOr("FACTORY_POLL_INTERVAL_SECONDS", 15),
@@ -229,6 +231,9 @@ func LoadFromEnv() (Config, error) {
 	if cfg.LogFormat != "text" && cfg.LogFormat != "json" {
 		return Config{}, fmt.Errorf("invalid FACTORY_LOG_FORMAT %q: must be text or json", cfg.LogFormat)
 	}
+	if len(cfg.AllowedGitHubUsers) == 0 {
+		return Config{}, errors.New("FACTORY_ALLOWED_GITHUB_USERS must contain at least one GitHub username")
+	}
 	return cfg, nil
 }
 
@@ -306,4 +311,17 @@ func envDuration(key string, fallback time.Duration) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid %s=%q: must be a positive duration", key, v)
 	}
 	return d, nil
+}
+
+func parseCSVAllowlist(raw string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(raw, ",") {
+		u := strings.ToLower(strings.TrimSpace(part))
+		if u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
 }

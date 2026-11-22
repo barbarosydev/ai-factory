@@ -7,7 +7,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/mock"
+	commonpb "go.temporal.io/api/common/v1"
+	enumspb "go.temporal.io/api/enums/v1"
+	historypb "go.temporal.io/api/history/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/worker"
 
 	"github.com/barbarosydev/ai-factory/internal/activities"
 	"github.com/barbarosydev/ai-factory/internal/config"
@@ -159,7 +165,7 @@ func TestWorkflowHumanClarificationSignalResume(t *testing.T) {
 				ClarificationQuestions: []string{"Which Berlin neighborhood is the shop in?"},
 			}, nil
 		}
-		if len(issue.Clarifications) != 1 || issue.Clarifications[0].Body != "Kreuzberg" {
+		if len(issue.Clarifications) != 2 || issue.Clarifications[1].Body != "Kreuzberg" {
 			t.Errorf("expected clarification 'Kreuzberg', got %+v", issue.Clarifications)
 		}
 		return contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil
@@ -173,6 +179,12 @@ func TestWorkflowHumanClarificationSignalResume(t *testing.T) {
 	env.OnActivity(a.CleanupWorktreeActivity, mock.Anything, mock.Anything).Return(nil)
 
 	env.RegisterDelayedCallback(func() {
+		// Duplicate of an already-processed comment ID (77) must be ignored while waiting.
+		env.SignalWorkflow(SignalHumanReply, HumanReplySignal{
+			CommentID: 77,
+			Author:    "barbarosydev",
+			Body:      "Stale duplicate signal",
+		})
 		env.SignalWorkflow(SignalHumanReply, HumanReplySignal{
 			CommentID: 99,
 			Author:    "barbarosydev",
@@ -181,7 +193,12 @@ func TestWorkflowHumanClarificationSignalResume(t *testing.T) {
 	}, 2*time.Hour)
 
 	env.ExecuteWorkflow(IssueFactoryWorkflow, WorkflowInput{
-		Issue:        contracts.CustomerIssueInput{IssueNumber: 43, IssueTitle: "Coffee", IssueBody: "Ambiguous"},
+		Issue: contracts.CustomerIssueInput{
+			IssueNumber:    43,
+			IssueTitle:     "Coffee",
+			IssueBody:      "Ambiguous",
+			Clarifications: []contracts.IssueComment{{ID: 77, Author: "barbarosydev", Body: "Initial note"}},
+		},
 		AutonomyMode: config.AutonomyReview,
 	})
 
@@ -276,5 +293,272 @@ func TestWorkflowRejectionAndRepairExhaustion(t *testing.T) {
 	_ = env3.GetWorkflowResult(&res3)
 	if res3.FinalState != "failed" || res3.Attempts != 1 {
 		t.Fatalf("expected failed after custom 1 repair attempt, got %+v", res3)
+	}
+}
+
+func TestIssueFactoryWorkflowReplay(t *testing.T) {
+	t.Parallel()
+
+	dc := converter.GetDefaultDataConverter()
+	mustPayloads := func(vals ...any) *commonpb.Payloads {
+		p, err := dc.ToPayloads(vals...)
+		if err != nil {
+			t.Fatalf("ToPayloads: %v", err)
+		}
+		return p
+	}
+
+	wfInput := WorkflowInput{
+		Issue: contracts.CustomerIssueInput{
+			IssueNumber: 44,
+			IssueTitle:  "Shop",
+			IssueBody:   "Add Stripe checkout",
+			RequestType: "new_website",
+		},
+		AutonomyMode: config.AutonomyReview,
+	}
+	pmRejected := contracts.PMDecisionOutput{
+		Status:          "rejected",
+		RejectionReason: "Stripe checkout is outside static single-page v1 scope.",
+	}
+	wfResult := WorkflowResult{
+		IssueNumber: 44,
+		FinalState:  "rejected",
+		Reason:      pmRejected.RejectionReason,
+	}
+
+	hist := &historypb.History{
+		Events: []*historypb.HistoryEvent{
+			{
+				EventId:   1,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+				Attributes: &historypb.HistoryEvent_WorkflowExecutionStartedEventAttributes{
+					WorkflowExecutionStartedEventAttributes: &historypb.WorkflowExecutionStartedEventAttributes{
+						WorkflowType: &commonpb.WorkflowType{Name: "IssueFactoryWorkflow"},
+						TaskQueue:    &taskqueuepb.TaskQueue{Name: "ai-factory-v1"},
+						Input:        mustPayloads(wfInput),
+					},
+				},
+			},
+			{
+				EventId:   2,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskScheduledEventAttributes{
+					WorkflowTaskScheduledEventAttributes: &historypb.WorkflowTaskScheduledEventAttributes{
+						TaskQueue: &taskqueuepb.TaskQueue{Name: "ai-factory-v1"},
+					},
+				},
+			},
+			{
+				EventId:   3,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{
+					WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
+						ScheduledEventId: 2,
+					},
+				},
+			},
+			{
+				EventId:   4,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
+					WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
+						ScheduledEventId: 2,
+						StartedEventId:   3,
+					},
+				},
+			},
+			{
+				EventId:   5,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskScheduledEventAttributes{
+					ActivityTaskScheduledEventAttributes: &historypb.ActivityTaskScheduledEventAttributes{
+						ActivityId:                   "5",
+						ActivityType:                 &commonpb.ActivityType{Name: "TransitionIssueStateActivity"},
+						WorkflowTaskCompletedEventId: 4,
+					},
+				},
+			},
+			{
+				EventId:   6,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskStartedEventAttributes{
+					ActivityTaskStartedEventAttributes: &historypb.ActivityTaskStartedEventAttributes{
+						ScheduledEventId: 5,
+					},
+				},
+			},
+			{
+				EventId:   7,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskCompletedEventAttributes{
+					ActivityTaskCompletedEventAttributes: &historypb.ActivityTaskCompletedEventAttributes{
+						ScheduledEventId: 5,
+						StartedEventId:   6,
+					},
+				},
+			},
+			{
+				EventId:   8,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskScheduledEventAttributes{
+					WorkflowTaskScheduledEventAttributes: &historypb.WorkflowTaskScheduledEventAttributes{
+						TaskQueue: &taskqueuepb.TaskQueue{Name: "ai-factory-v1"},
+					},
+				},
+			},
+			{
+				EventId:   9,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{
+					WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
+						ScheduledEventId: 8,
+					},
+				},
+			},
+			{
+				EventId:   10,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
+					WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
+						ScheduledEventId: 8,
+						StartedEventId:   9,
+					},
+				},
+			},
+			{
+				EventId:   11,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskScheduledEventAttributes{
+					ActivityTaskScheduledEventAttributes: &historypb.ActivityTaskScheduledEventAttributes{
+						ActivityId:                   "11",
+						ActivityType:                 &commonpb.ActivityType{Name: "RunPMAgentActivity"},
+						WorkflowTaskCompletedEventId: 10,
+					},
+				},
+			},
+			{
+				EventId:   12,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskStartedEventAttributes{
+					ActivityTaskStartedEventAttributes: &historypb.ActivityTaskStartedEventAttributes{
+						ScheduledEventId: 11,
+					},
+				},
+			},
+			{
+				EventId:   13,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskCompletedEventAttributes{
+					ActivityTaskCompletedEventAttributes: &historypb.ActivityTaskCompletedEventAttributes{
+						Result:           mustPayloads(pmRejected),
+						ScheduledEventId: 11,
+						StartedEventId:   12,
+					},
+				},
+			},
+			{
+				EventId:   14,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskScheduledEventAttributes{
+					WorkflowTaskScheduledEventAttributes: &historypb.WorkflowTaskScheduledEventAttributes{
+						TaskQueue: &taskqueuepb.TaskQueue{Name: "ai-factory-v1"},
+					},
+				},
+			},
+			{
+				EventId:   15,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{
+					WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
+						ScheduledEventId: 14,
+					},
+				},
+			},
+			{
+				EventId:   16,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
+					WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
+						ScheduledEventId: 14,
+						StartedEventId:   15,
+					},
+				},
+			},
+			{
+				EventId:   17,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskScheduledEventAttributes{
+					ActivityTaskScheduledEventAttributes: &historypb.ActivityTaskScheduledEventAttributes{
+						ActivityId:                   "17",
+						ActivityType:                 &commonpb.ActivityType{Name: "TransitionIssueStateActivity"},
+						WorkflowTaskCompletedEventId: 16,
+					},
+				},
+			},
+			{
+				EventId:   18,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskStartedEventAttributes{
+					ActivityTaskStartedEventAttributes: &historypb.ActivityTaskStartedEventAttributes{
+						ScheduledEventId: 17,
+					},
+				},
+			},
+			{
+				EventId:   19,
+				EventType: enumspb.EVENT_TYPE_ACTIVITY_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_ActivityTaskCompletedEventAttributes{
+					ActivityTaskCompletedEventAttributes: &historypb.ActivityTaskCompletedEventAttributes{
+						ScheduledEventId: 17,
+						StartedEventId:   18,
+					},
+				},
+			},
+			{
+				EventId:   20,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskScheduledEventAttributes{
+					WorkflowTaskScheduledEventAttributes: &historypb.WorkflowTaskScheduledEventAttributes{
+						TaskQueue: &taskqueuepb.TaskQueue{Name: "ai-factory-v1"},
+					},
+				},
+			},
+			{
+				EventId:   21,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskStartedEventAttributes{
+					WorkflowTaskStartedEventAttributes: &historypb.WorkflowTaskStartedEventAttributes{
+						ScheduledEventId: 20,
+					},
+				},
+			},
+			{
+				EventId:   22,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+				Attributes: &historypb.HistoryEvent_WorkflowTaskCompletedEventAttributes{
+					WorkflowTaskCompletedEventAttributes: &historypb.WorkflowTaskCompletedEventAttributes{
+						ScheduledEventId: 20,
+						StartedEventId:   21,
+					},
+				},
+			},
+			{
+				EventId:   23,
+				EventType: enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+				Attributes: &historypb.HistoryEvent_WorkflowExecutionCompletedEventAttributes{
+					WorkflowExecutionCompletedEventAttributes: &historypb.WorkflowExecutionCompletedEventAttributes{
+						Result:                       mustPayloads(wfResult),
+						WorkflowTaskCompletedEventId: 22,
+					},
+				},
+			},
+		},
+	}
+
+	replayer := worker.NewWorkflowReplayer()
+	replayer.RegisterWorkflow(IssueFactoryWorkflow)
+	if err := replayer.ReplayWorkflowHistory(nil, hist); err != nil {
+		t.Fatalf("ReplayWorkflowHistory failed determinism check: %v", err)
 	}
 }

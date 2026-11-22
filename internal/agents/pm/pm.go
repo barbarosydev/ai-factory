@@ -89,7 +89,7 @@ func (a *Agent) AnalyzeIssue(ctx context.Context, issue contracts.CustomerIssueI
 			Model:       a.modelName,
 			Messages:    messages,
 			Temperature: 0.2,
-			MaxTokens:   4096,
+			MaxTokens:   8192,
 			Options:     map[string]any{"num_ctx": a.numCtx},
 			Tags:        tags,
 		})
@@ -131,10 +131,62 @@ func (a *Agent) AnalyzeIssue(ctx context.Context, issue contracts.CustomerIssueI
 
 func extractJSONObject(s string) string {
 	trimmed := strings.TrimSpace(s)
-	start := strings.IndexByte(trimmed, '{')
-	end := strings.LastIndexByte(trimmed, '}')
-	if start >= 0 && end > start {
-		return trimmed[start : end+1]
+	if trimmed == "" {
+		return ""
+	}
+	var candidates []string
+	depth := 0
+	start := -1
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(trimmed); i++ {
+		ch := trimmed[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 && start >= 0 {
+					candidates = append(candidates, trimmed[start:i+1])
+					start = -1
+				}
+			}
+		}
+	}
+
+	for i := len(candidates) - 1; i >= 0; i-- {
+		if json.Valid([]byte(candidates[i])) {
+			return candidates[i]
+		}
+	}
+	if len(candidates) > 0 {
+		return candidates[len(candidates)-1]
+	}
+	first := strings.IndexByte(trimmed, '{')
+	last := strings.LastIndexByte(trimmed, '}')
+	if first >= 0 && last > first {
+		return trimmed[first : last+1]
 	}
 	return trimmed
 }
