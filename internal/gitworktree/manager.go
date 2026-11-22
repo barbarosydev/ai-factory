@@ -193,30 +193,37 @@ func (m *Manager) CommitAndPush(ctx context.Context, worktreeDir string, spec co
 	if err != nil {
 		return "", err
 	}
-	if !audit.PathIsolationOK {
-		return "", fmt.Errorf("refusing to commit: path isolation check failed (%v)", audit.ChangedFiles)
-	}
 
-	siteRel := filepath.Join("sites", spec.SiteSlug)
-	if err := m.gitRun(ctx, worktreeDir, "add", siteRel); err != nil {
-		return "", fmt.Errorf("git add: %w", err)
-	}
+	branch := BranchName(issueNumber)
+	aheadCount, _ := m.gitOutput(ctx, worktreeDir, "rev-list", "--count", "origin/main..HEAD")
+	alreadyCommitted := len(audit.ChangedFiles) == 0 && strings.TrimSpace(aheadCount) != "" && strings.TrimSpace(aheadCount) != "0"
 
-	botEmail := fmt.Sprintf("%d+%s@users.noreply.github.com", m.appID, m.botName)
-	if m.appID <= 0 {
-		botEmail = "ai-factory[bot]@users.noreply.github.com"
-	}
-	commitMsg := fmt.Sprintf("feat(%s): implement website for issue #%d", spec.SiteSlug, issueNumber)
-	if spec.Operation == "modify" {
-		commitMsg = fmt.Sprintf("feat(%s): update website for issue #%d", spec.SiteSlug, issueNumber)
-	}
+	if !alreadyCommitted {
+		if !audit.PathIsolationOK {
+			return "", fmt.Errorf("refusing to commit: path isolation check failed (%v)", audit.ChangedFiles)
+		}
 
-	if err := m.gitRun(ctx, worktreeDir,
-		"-c", "user.name="+m.botName,
-		"-c", "user.email="+botEmail,
-		"commit", "--no-verify", "-m", commitMsg,
-	); err != nil {
-		return "", fmt.Errorf("git commit: %w", err)
+		siteRel := filepath.Join("sites", spec.SiteSlug)
+		if err := m.gitRun(ctx, worktreeDir, "add", siteRel); err != nil {
+			return "", fmt.Errorf("git add: %w", err)
+		}
+
+		botEmail := fmt.Sprintf("%d+%s@users.noreply.github.com", m.appID, m.botName)
+		if m.appID <= 0 {
+			botEmail = "ai-factory[bot]@users.noreply.github.com"
+		}
+		commitMsg := fmt.Sprintf("feat(%s): implement website for issue #%d", spec.SiteSlug, issueNumber)
+		if spec.Operation == "modify" {
+			commitMsg = fmt.Sprintf("feat(%s): update website for issue #%d", spec.SiteSlug, issueNumber)
+		}
+
+		if err := m.gitRun(ctx, worktreeDir,
+			"-c", "user.name="+m.botName,
+			"-c", "user.email="+botEmail,
+			"commit", "--no-verify", "-m", commitMsg,
+		); err != nil {
+			return "", fmt.Errorf("git commit: %w", err)
+		}
 	}
 
 	shaOut, err := m.gitOutput(ctx, worktreeDir, "rev-parse", "HEAD")
@@ -224,7 +231,7 @@ func (m *Manager) CommitAndPush(ctx context.Context, worktreeDir string, spec co
 		return "", fmt.Errorf("rev-parse HEAD: %w", err)
 	}
 
-	branch := BranchName(issueNumber)
+	_ = m.gitWithAuth(ctx, worktreeDir, "fetch", "--prune", "origin")
 	if err := m.gitWithAuth(ctx, worktreeDir, "push", "--force-with-lease", "-u", "origin", branch); err != nil {
 		return "", fmt.Errorf("git push %s: %w", branch, err)
 	}
