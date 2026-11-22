@@ -72,3 +72,5 @@ All repair caps, wait timeouts, activity timeouts, heartbeat intervals, and work
 | `FACTORY_METRICS_ADDR` | `127.0.0.1:9091` | HTTP bind address for `/healthz`, `/readyz`, `/metrics` (`off` to disable) |
 | `FACTORY_LOG_FORMAT` | `text` | Structured `log/slog` format (`text` or `json`) |
 | `FACTORY_ALLOWED_GITHUB_USERS` | `barbarosydev` | Comma-separated GitHub usernames permitted to trigger issues or send clarification replies |
+| `FACTORY_AGENT_RUNTIME` | `pydanticai` | Agent activity worker runtime (`pydanticai` Python worker or `go` in-process baseline) |
+| `FACTORY_AGENT_TASK_QUEUE` | `ai-factory-agents` | Temporal task queue for PydanticAI agent activities when `FACTORY_AGENT_RUNTIME=pydanticai` |

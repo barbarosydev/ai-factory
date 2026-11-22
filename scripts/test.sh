@@ -12,3 +12,9 @@ info "hook tests"
 require_cmd go
 info "go tests"
 go test -race ./... "$@"
+
+if [[ -f "$REPO_ROOT/agents_py/pyproject.toml" ]]; then
+  require_cmd uv
+  info "python agent tests (pytest)"
+  uv run --directory "$REPO_ROOT/agents_py" --locked pytest -q
+fi

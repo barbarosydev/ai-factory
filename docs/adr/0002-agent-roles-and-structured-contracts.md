@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (amended by [ADR 0007](0007-gemma4-structured-json-and-high-velocity-skills.md))
+Accepted (amended by [ADR 0007](0007-gemma4-structured-json-and-high-velocity-skills.md) and [ADR 0008](0008-polyglot-pydanticai-and-mcp-agent-runtime.md))
 
 ## Date
 

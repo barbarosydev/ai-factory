@@ -222,3 +222,35 @@ func TestScaffoldSiteFromSpecSkill(t *testing.T) {
 		t.Errorf("FilesChanged=%v, want [index.html script.js styles.css]", res.FilesChanged)
 	}
 }
+
+func TestCheckSiteStructureRejectsLeakedPurposeCopy(t *testing.T) {
+	t.Parallel()
+
+	sb, err := OpenSiteSandbox(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sb.Close() }()
+
+	spec := testSpec()
+	spec.Sections[0].Purpose = "Welcome visitors with the roastery tagline and primary call to action."
+
+	_, _ = sb.WriteFile("index.html", `<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title></head>
+<body>
+  <header><nav><a href="#menu">Menu</a></nav></header>
+  <main>
+    <section id="hero"><h1>Kaffeekultur</h1><p>Welcome visitors with the roastery tagline and primary call to action.</p></section>
+    <section id="menu"><h2>Menu</h2></section>
+    <section id="hours"><h2>Hours</h2></section>
+  </main>
+  <footer>Kaffeekultur Berlin</footer>
+</body>
+</html>`)
+
+	res := sb.CheckSiteStructure(spec)
+	if res.Passed {
+		t.Fatal("expected CheckSiteStructure to reject leaked spec.purpose instruction text")
+	}
+}

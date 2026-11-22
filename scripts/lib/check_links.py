@@ -61,9 +61,7 @@ def code_path_candidate(code: str) -> str | None:
 
 def is_ignored(root: pathlib.Path, path: str) -> bool:
     return (
-        subprocess.run(
-            ["git", "-C", str(root), "check-ignore", "-q", path], check=False
-        ).returncode
+        subprocess.run(["git", "-C", str(root), "check-ignore", "-q", path], check=False).returncode
         == 0
     )
 
@@ -71,9 +69,7 @@ def is_ignored(root: pathlib.Path, path: str) -> bool:
 def check_file(root: pathlib.Path, md_file: pathlib.Path) -> list[tuple[int, str]]:
     broken: list[tuple[int, str]] = []
     in_fence = False
-    for lineno, line in enumerate(
-        md_file.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    for lineno, line in enumerate(md_file.read_text(encoding="utf-8").splitlines(), start=1):
         if FENCE_RE.match(line):
             in_fence = not in_fence
             continue

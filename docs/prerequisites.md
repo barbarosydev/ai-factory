@@ -19,10 +19,11 @@ brew bundle --no-upgrade
 
 ## 3. Pinned CLI tools (`mise`)
 
-`mise.toml` pins the exact latest stable versions of Go, `golangci-lint`, Temporal CLI, Task, Conftest, ShellCheck, actionlint, jq, yq, pre-commit, and gitleaks:
+`mise.toml` pins the exact latest stable versions of Go, `uv`, `golangci-lint`, Temporal CLI, Task, Conftest, ShellCheck, actionlint, jq, yq, pre-commit, and gitleaks:
 
 ```bash
 mise install
+uv sync --directory agents_py --locked
 ```
 
 ## 4. Commit hook and verification

@@ -18,10 +18,13 @@ func TestLoadFromEnvDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("FACTORY_METRICS_ADDR", ":9091")
 	t.Setenv("FACTORY_MAX_CONCURRENT_ACTIVITIES", "2")
 	t.Setenv("FACTORY_ALLOWED_GITHUB_USERS", " BarbarosYdev , alice ")
+	t.Setenv("FACTORY_AGENT_RUNTIME", "GO")
 
 	cfg, err := LoadFromEnv()
 	require.NoError(t, err)
 	require.Equal(t, AutonomyAuto, cfg.AutonomyMode)
+	require.Equal(t, "go", cfg.AgentRuntime)
+	require.Equal(t, "ai-factory-agents", cfg.AgentTaskQueue)
 	require.Equal(t, []string{"barbarosydev", "alice"}, cfg.AllowedGitHubUsers)
 	require.Equal(t, 5, cfg.Policy.MaxRepairAttempts)
 	require.Equal(t, 3, cfg.Policy.MaxClarificationRounds)

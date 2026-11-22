@@ -4,7 +4,7 @@ Local-first asynchronous multi-agent AI Software Factory powered by Temporal, Li
 
 ## Architecture
 
-- Control plane & Temporal worker written in Go (`1.27`), running natively on the Mac host (`temporal.localhost:7233`, `http://temporal.localhost:8080`, `http://litellm.localhost:8080/v1`).
+- Control plane & Temporal workflow worker written in Go (`1.27`), running natively on the Mac host (`temporal.localhost:7233`, `http://temporal.localhost:8080`, `http://litellm.localhost:8080/v1`), paired with a selectable **PydanticAI + MCP** Python Temporal Activity Worker (`agents_py/`, `FACTORY_AGENT_RUNTIME=pydanticai|go`, default `pydanticai`).
 - Sequential activity execution (`MaxConcurrentActivityExecutionSize = 1`; leaving `MaxConcurrentWorkflowTaskExecutionSize` unset per Go SDK sticky cache requirements) fits comfortably inside the Mac's 36 GB unified memory.
 - Four independent agents with dedicated LiteLLM routes and scoped virtual keys (`pm-agent`, `dev-agent`, `test-agent`, `sec-agent`), connected via typed JSON contracts in `internal/contracts/`.
 - Developer Agent edits stay jailed to `.worktrees/issue-<N>/sites/<slug>/` via `os.OpenRoot`, using high-velocity scaffolding (`scaffold_site_from_spec`, `write_site_bundle`) and granular file/structure tools.

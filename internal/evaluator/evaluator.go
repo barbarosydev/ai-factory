@@ -63,6 +63,7 @@ func (e *PlaywrightEvaluator) RunPlaywrightSuite(
 		"SITE_SERVER_PORT="+strconv.Itoa(port),
 		"PW_REPORTER=json",
 		"WRITE_EVIDENCE=1",
+		"STRICT_COPY=1",
 	)
 
 	var stdout, stderr bytes.Buffer

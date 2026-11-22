@@ -43,13 +43,9 @@ def check_repo(root: pathlib.Path) -> list[str]:
         missing = sorted(defined - documented)
         unknown = sorted(documented - defined)
         if missing:
-            errors.append(
-                f"{rel}: missing tasks from Taskfile.yml: {', '.join(missing)}"
-            )
+            errors.append(f"{rel}: missing tasks from Taskfile.yml: {', '.join(missing)}")
         if unknown:
-            errors.append(
-                f"{rel}: unknown tasks not in Taskfile.yml: {', '.join(unknown)}"
-            )
+            errors.append(f"{rel}: unknown tasks not in Taskfile.yml: {', '.join(unknown)}")
     return errors
 
 

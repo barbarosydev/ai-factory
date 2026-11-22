@@ -16,14 +16,14 @@ flowchart LR
     LITE --> OLLAMA
   end
 
-  subgraph FACTORY["ai-factory (Go Host Control Plane)"]
-    POLLER["FIFO Issue & Comment Poller (15s)"]
-    WORKER["Temporal Worker (MaxConcurrentActivityExecutionSize = 1)"]
-    AGENTS["pm-agent · dev-agent · test-agent · sec-agent"]
+  subgraph FACTORY["ai-factory (Polyglot Temporal Workers)"]
+    POLLER["FIFO Issue & Comment Poller (15s + Actor Allowlist)"]
+    WORKER["Go Control Worker (ai-factory-v1: Workflow, Git, GitHub)"]
+    PYWORKER["PydanticAI + MCP Worker (ai-factory-agents: pm, dev, test, sec)"]
     POLLER --> TEMP
     TEMP <--> WORKER
-    WORKER --> AGENTS
-    AGENTS -->|Per-agent virtual keys| LITE
+    TEMP <-->|FACTORY_AGENT_RUNTIME=pydanticai| PYWORKER
+    PYWORKER -->|Per-agent virtual keys| LITE
   end
 
   subgraph TARGET["ai-factory-websites (Target Monorepo)"]
@@ -64,7 +64,8 @@ stateDiagram-v2
 | **`internal/controlplane`** | Temporal worker startup (`MaxConcurrentActivityExecutionSize: 1`), single-issue FIFO scheduler, signal bridge, shared GitHub/doctor/status probes | [runner.go](../internal/controlplane/runner.go), [doctor.go](../internal/controlplane/doctor.go), [status.go](../internal/controlplane/status.go), [github.go](../internal/controlplane/github.go) |
 | **`internal/githubapp`** | Stdlib RS256 App JWT signer, 1-hour token cache, Issue Form markdown parser, `IssueController` (PR creation + Checks API wait + squash merge + branch cleanup) | [auth.go](../internal/githubapp/auth.go), [parser.go](../internal/githubapp/parser.go), [client.go](../internal/githubapp/client.go) |
 | **`internal/workflow` & `internal/activities`** | Deterministic `IssueFactoryWorkflow` (`workflowcheck` verified) and 15-second background heartbeat wrapper (`startHeartbeatLoop`) keeping long LLM calls alive cleanly | [issue_workflow.go](../internal/workflow/issue_workflow.go), [activities.go](../internal/activities/activities.go) |
-| **`internal/agents/{pm,dev,tester,reviewer,llm}`** | Typed contracts & prompts for the 4 independent agents (`pm` normalization + fallback extraction, `dev` `os.OpenRoot` sandbox & scaffold synthesizer, `test` Playwright + DOM bundle, `sec` audit) | [pm.go](../internal/agents/pm/pm.go), [tools.go](../internal/agents/dev/tools.go), [scaffold.go](../internal/agents/dev/scaffold.go), [agent.go](../internal/agents/tester/agent.go), [agent.go](../internal/agents/reviewer/agent.go) |
+| **`internal/agents/{pm,dev,tester,reviewer,llm}`** | Typed Go agent baseline (`FACTORY_AGENT_RUNTIME=go`), `os.OpenRoot` sandbox, context compaction, and anti-prompt-leak checks | [pm.go](../internal/agents/pm/pm.go), [tools.go](../internal/agents/dev/tools.go), [agent.go](../internal/agents/tester/agent.go), [agent.go](../internal/agents/reviewer/agent.go) |
+| **`agents_py/`** | Default PydanticAI + MCP Python Temporal Activity Worker (`FACTORY_AGENT_RUNTIME=pydanticai`, queue `ai-factory-agents`) | [agents.py](../agents_py/src/agents_py/agents.py), [mcp_tools.py](../agents_py/src/agents_py/mcp_tools.py), [security.py](../agents_py/src/agents_py/security.py), [worker.py](../agents_py/src/agents_py/worker.py) |
 | **`internal/gitworktree` & `internal/evaluator`** | Isolated `factory/issue-<N>` worktrees, ephemeral `GIT_ASKPASS` pushes, failed snapshot archival (max 5 kept), Playwright JSON parser & URL scanner | [manager.go](../internal/gitworktree/manager.go), [evaluator.go](../internal/evaluator/evaluator.go) |
 
 ## Design, Observability & Kubernetes Readiness

@@ -44,9 +44,9 @@ fi
 py_files="$(tracked '*.py')"
 if [[ -n "$py_files" ]]; then
   # shellcheck disable=SC2086
-  run "ruff check ($(wc -l <<<"$py_files" | tr -d ' ') files)" ruff check --quiet $py_files
+  run "ruff check ($(wc -l <<<"$py_files" | tr -d ' ') files)" ruff check --quiet --config "$REPO_ROOT/agents_py/pyproject.toml" $py_files
   # shellcheck disable=SC2086
-  run "ruff format --check" ruff format --check --quiet $py_files
+  run "ruff format --check" ruff format --check --quiet --config "$REPO_ROOT/agents_py/pyproject.toml" $py_files
 fi
 
 # shellcheck disable=SC2317,SC2329

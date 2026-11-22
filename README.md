@@ -34,7 +34,7 @@ flowchart LR
 - **[Prerequisites](docs/prerequisites.md)** & **[GitHub App Setup](docs/github-app-setup.md)** — Fresh-Mac installation and Keychain setup
 - **[Operations Runbook](docs/runbook.md)** — Daily startup, monitoring (`task status`), and debugging failed snapshots
 - **[AI Agent Harness](docs/harness.md)** — Rules, permissions, Conftest policies, review roles, and tested hooks
-- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0007`
+- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0008`
 
 ## Ecosystem Repositories
 

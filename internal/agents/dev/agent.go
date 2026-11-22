@@ -58,7 +58,7 @@ func (a *Agent) Implement(
 		{Role: "system", Content: prompts.DevSystem},
 		{
 			Role:    "user",
-			Content: fmt.Sprintf("Implement or update the website for this DeveloperTaskInput (prefer `scaffold_site_from_spec` or `write_site_bundle` to complete quickly):\n\n```json\n%s\n```", string(taskJSON)),
+			Content: fmt.Sprintf("Implement or update the website for this DeveloperTaskInput using `write_site_bundle` or `read_file`/`write_file` (author authentic domain copy; never copy `section.purpose` verbatim into HTML):\n\n```json\n%s\n```", string(taskJSON)),
 		},
 	}
 
@@ -77,7 +77,7 @@ func (a *Agent) Implement(
 
 		resp, err := a.client.ChatCompletion(ctx, llm.ChatRequest{
 			Model:       a.modelName,
-			Messages:    messages,
+			Messages:    compactDeveloperHistory(messages),
 			Tools:       tools,
 			Temperature: 0.1,
 			MaxTokens:   8192,
@@ -94,7 +94,7 @@ func (a *Agent) Implement(
 		if len(assistantMsg.ToolCalls) == 0 {
 			messages = append(messages, llm.Message{
 				Role:    "user",
-				Content: "Call `scaffold_site_from_spec`, `write_site_bundle`, `write_file`, or `finish` rather than replying with plain text.",
+				Content: "Call `write_site_bundle`, `write_file`, or `finish` rather than replying with plain text.",
 			})
 			continue
 		}
@@ -306,27 +306,41 @@ func sortedKeys(m map[string]bool) []string {
 	return keys
 }
 
+// compactDeveloperHistory trims large file-write tool-call payloads from older turns
+// (keeping the most recent 4 messages intact) so local 32k context stays fast.
+func compactDeveloperHistory(messages []llm.Message) []llm.Message {
+	if len(messages) <= 6 {
+		return messages
+	}
+	cutoff := len(messages) - 4
+	out := make([]llm.Message, len(messages))
+	copy(out, messages)
+	for i := 2; i < cutoff; i++ {
+		if len(out[i].ToolCalls) > 0 {
+			trimmed := make([]llm.ToolCall, len(out[i].ToolCalls))
+			copy(trimmed, out[i].ToolCalls)
+			for j := range trimmed {
+				if (trimmed[j].Function.Name == "write_site_bundle" || trimmed[j].Function.Name == "write_file") &&
+					len(trimmed[j].Function.Arguments) > 400 {
+					trimmed[j].Function.Arguments = `{"compacted":"previous file write omitted"}`
+				}
+			}
+			out[i].ToolCalls = trimmed
+		}
+		if out[i].Role == "tool" && len(out[i].Content) > 1200 {
+			out[i].Content = out[i].Content[:1000] + `... [compacted]`
+		}
+	}
+	return out
+}
+
 func developerTools() []llm.Tool {
 	return []llm.Tool{
 		{
 			Type: "function",
 			Function: llm.FunctionDefinition{
-				Name:        "scaffold_site_from_spec",
-				Description: "High-velocity skill: generate a complete, responsive, accessible HTML5/CSS3/JS website (index.html, styles.css, script.js) from WebsiteSpecification, validate structure, and finish in 1 call.",
-				Parameters: map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"auto_finish": map[string]any{"type": "boolean", "description": "Automatically complete implementation if structure validation passes (default true)"},
-						"summary":     map[string]any{"type": "string", "description": "Concise summary of the generated website"},
-					},
-				},
-			},
-		},
-		{
-			Type: "function",
-			Function: llm.FunctionDefinition{
 				Name:        "write_site_bundle",
-				Description: "Batch skill: write index.html, styles.css, and/or script.js in one tool call, validate structure, and finish if valid.",
+				Description: "Batch skill: write complete, authentic index.html, styles.css, and/or script.js in one tool call, validate structure (including zero leaked spec.purpose instructions), and finish if valid.",
 				Parameters: map[string]any{
 					"type": "object",
 					"properties": map[string]any{

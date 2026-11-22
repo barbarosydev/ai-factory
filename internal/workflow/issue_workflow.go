@@ -38,10 +38,11 @@ type WorkflowStatus struct {
 
 // WorkflowInput starts IssueFactoryWorkflow for one eligible GitHub issue.
 type WorkflowInput struct {
-	Issue        contracts.CustomerIssueInput `json:"issue"`
-	AutonomyMode config.AutonomyMode          `json:"autonomy_mode"`
-	SkipRemoteCI bool                         `json:"skip_remote_ci"`
-	Policy       config.WorkflowPolicy        `json:"policy"`
+	Issue          contracts.CustomerIssueInput `json:"issue"`
+	AutonomyMode   config.AutonomyMode          `json:"autonomy_mode"`
+	SkipRemoteCI   bool                         `json:"skip_remote_ci"`
+	Policy         config.WorkflowPolicy        `json:"policy"`
+	AgentTaskQueue string                       `json:"agent_task_queue,omitempty"`
 }
 
 // WorkflowResult summarizes the terminal state of an IssueFactoryWorkflow execution.
@@ -88,6 +89,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	pmOpts := workflow.ActivityOptions{
+		TaskQueue:           in.AgentTaskQueue,
 		StartToCloseTimeout: policy.PMTimeout,
 		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -101,6 +103,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		pmOpts.RetryPolicy.MaximumAttempts = 1
 	}
 	devOpts := workflow.ActivityOptions{
+		TaskQueue:           in.AgentTaskQueue,
 		StartToCloseTimeout: policy.DevTimeout,
 		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -111,6 +114,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	testOpts := workflow.ActivityOptions{
+		TaskQueue:           in.AgentTaskQueue,
 		StartToCloseTimeout: policy.TestTimeout,
 		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
@@ -121,6 +125,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		},
 	}
 	revOpts := workflow.ActivityOptions{
+		TaskQueue:           in.AgentTaskQueue,
 		StartToCloseTimeout: policy.ReviewTimeout,
 		HeartbeatTimeout:    policy.HeartbeatTimeout,
 		RetryPolicy: &temporal.RetryPolicy{
