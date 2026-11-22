@@ -216,7 +216,7 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 	if err != nil {
 		return StructureCheckResult{
 			Passed: false,
-			Errors: []string{"index.html is missing; call scaffold_site_from_spec or write_file to create index.html"},
+			Errors: []string{"index.html is missing; call write_site_bundle or write_file to create index.html"},
 		}
 	}
 
@@ -234,9 +234,11 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 		}
 	}
 
-	var hasDoctype, hasViewport, hasHeaderOrNav, hasMain, hasFooter bool
+	var hasDoctype, hasCharset, hasViewport, hasHeaderOrNav, hasMain, hasFooter bool
+	var footerText string
 	ids := make(map[string]bool)
 	idText := make(map[string]string)
+	anchors := make(map[string]bool)
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.DoctypeNode && strings.EqualFold(n.Data, "html") {
@@ -250,7 +252,17 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 				hasMain = true
 			case "footer":
 				hasFooter = true
+				footerText += " " + strings.ToLower(extractNodeText(n))
+			case "a":
+				if href := attr(n, "href"); href != "" {
+					anchors[href] = true
+				}
 			case "meta":
+				if strings.EqualFold(strings.TrimSpace(attr(n, "charset")), "utf-8") ||
+					(strings.EqualFold(strings.TrimSpace(attr(n, "http-equiv")), "content-type") &&
+						strings.Contains(strings.ToLower(attr(n, "content")), "utf-8")) {
+					hasCharset = true
+				}
 				if strings.EqualFold(attr(n, "name"), "viewport") && strings.Contains(attr(n, "content"), "width=device-width") {
 					hasViewport = true
 				}
@@ -281,6 +293,9 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 	if !hasDoctype {
 		errs = append(errs, "index.html is missing <!DOCTYPE html>")
 	}
+	if !hasCharset {
+		errs = append(errs, `index.html is missing <meta charset="UTF-8">`)
+	}
 	if !hasViewport {
 		errs = append(errs, `index.html is missing <meta name="viewport" content="width=device-width, initial-scale=1.0">`)
 	}
@@ -292,6 +307,18 @@ func (s *SiteSandbox) CheckSiteStructure(spec contracts.WebsiteSpecification) St
 	}
 	if !hasFooter {
 		errs = append(errs, "index.html must include a <footer> landmark")
+	} else if strings.TrimSpace(spec.FooterText) != "" {
+		actualFooter := strings.Join(strings.Fields(footerText), " ")
+		expectedFooter := strings.Join(strings.Fields(strings.ToLower(spec.FooterText)), " ")
+		if !strings.Contains(actualFooter, expectedFooter) {
+			errs = append(errs, fmt.Sprintf("<footer> must include exact spec.footer_text %q", spec.FooterText))
+		}
+	}
+
+	for _, nav := range spec.Navigation {
+		if nav.Href != "" && !anchors[nav.Href] {
+			errs = append(errs, fmt.Sprintf("navigation link %q (%q) is missing from index.html", nav.Label, nav.Href))
+		}
 	}
 
 	for _, sec := range spec.Sections {

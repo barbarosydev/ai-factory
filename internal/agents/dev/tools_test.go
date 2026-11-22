@@ -128,8 +128,8 @@ func TestDeveloperAgentMultiTurnLoop(t *testing.T) {
 				"path": "index.html",
 				"content": `<!DOCTYPE html>
 <html lang="en">
-<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title><link rel="stylesheet" href="styles.css"></head>
-<body><header><nav><a href="#menu">Menu</a></nav></header><main><section id="hero"><h1>Kaffeekultur</h1></section><section id="menu"><h2>Menu</h2></section><section id="hours"><h2>Hours</h2></section></main><footer>Kaffeekultur</footer></body>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title><link rel="stylesheet" href="styles.css"></head>
+<body><header><nav><a href="#menu">Menu</a></nav></header><main><section id="hero"><h1>Kaffeekultur</h1></section><section id="menu"><h2>Menu</h2></section><section id="hours"><h2>Hours</h2></section></main><footer>Kaffeekultur Berlin</footer></body>
 </html>`,
 			})
 			argsCSS, _ := json.Marshal(map[string]string{

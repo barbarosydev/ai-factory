@@ -100,7 +100,7 @@ async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None
         if call_count == 1:
             html = """<!DOCTYPE html>
 <html>
-<head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title><link rel="stylesheet" href="styles.css"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title><link rel="stylesheet" href="styles.css"></head>
 <body>
   <header><nav><a href="#menu">Menu</a></nav></header>
   <main>
