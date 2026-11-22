@@ -136,7 +136,7 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	if opts.Once {
 		return runOnce(ctx, cfg, tc, ghClient, opts, reg, logger, out)
 	}
-	return runPoller(ctx, cfg, tc, ghClient, opts, out)
+	return runPoller(ctx, cfg, tc, ghClient, opts, reg, logger, out)
 }
 
 func observedLLMClient(baseURL, apiKey, role string, reg *telemetry.Registry, logger *slog.Logger) *llm.Client {
@@ -248,9 +248,12 @@ func runPoller(
 	tc client.Client,
 	ghClient *githubapp.Client,
 	opts RunOptions,
+	reg *telemetry.Registry,
+	logger *slog.Logger,
 	out io.Writer,
 ) error {
 	signaledComments := make(map[int]int64)
+	watchedRuns := make(map[string]bool)
 	pollTick := func() {
 		polled, err := ghClient.PollOpenFactoryIssues(ctx)
 		if err != nil {
@@ -274,8 +277,17 @@ func runPoller(
 			return
 		}
 		nextIssue := polled.Ready[0]
-		if _, err := ensureStartedOrSignaled(ctx, tc, cfg, nextIssue, opts, out); err != nil {
+		runID, err := ensureStartedOrSignaled(ctx, tc, cfg, nextIssue, opts, out)
+		if err != nil {
 			_, _ = fmt.Fprintf(out, "start workflow for issue #%d error: %v\n", nextIssue.IssueNumber, err)
+			return
+		}
+		wfID := workflow.WorkflowID(nextIssue.IssueNumber)
+		watchKey := wfID + "/" + runID
+		if runID != "" && !watchedRuns[watchKey] {
+			watchedRuns[watchKey] = true
+			start := time.Now()
+			go observeWorkflowCompletion(ctx, tc, wfID, runID, start, reg, logger)
 		}
 	}
 
@@ -291,6 +303,42 @@ func runPoller(
 		case <-ticker.C:
 			pollTick()
 		}
+	}
+}
+
+func observeWorkflowCompletion(
+	ctx context.Context,
+	tc client.Client,
+	wfID string,
+	runID string,
+	start time.Time,
+	reg *telemetry.Registry,
+	logger *slog.Logger,
+) {
+	var res workflow.WorkflowResult
+	err := tc.GetWorkflow(ctx, wfID, runID).Get(ctx, &res)
+	if ctx.Err() != nil {
+		return
+	}
+	elapsed := time.Since(start)
+	if err != nil {
+		reg.RecordWorkflow("failed", elapsed, 0)
+		if logger != nil {
+			logger.Warn("workflow failed", "workflow_id", wfID, "run_id", runID, "error", err)
+		}
+		return
+	}
+	reg.RecordWorkflow(res.FinalState, elapsed, res.Attempts)
+	if logger != nil {
+		logger.Info("workflow finished",
+			"workflow_id", wfID,
+			"final_state", res.FinalState,
+			"site", res.SiteSlug,
+			"attempts", res.Attempts,
+			"merged", res.Merged,
+			"pr_url", res.PRURL,
+			"duration_ms", elapsed.Milliseconds(),
+		)
 	}
 }
 

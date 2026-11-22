@@ -85,7 +85,39 @@ func TestTesterAgentCannotOverrideFailedPlaywright(t *testing.T) {
 	if report.Passed {
 		t.Fatal("expected report.Passed=false when Playwright failed")
 	}
-	if len(report.Failures) != 1 || report.Failures[0].FileHint != "styles.css" {
-		t.Fatalf("expected Tester Agent root-cause FailureEvidence, got: %+v", report.Failures)
+	if len(report.Failures) != 2 {
+		t.Fatalf("expected both Playwright failure and Tester diagnosis to be preserved, got: %+v", report.Failures)
+	}
+	if report.Failures[1].FileHint != "styles.css" {
+		t.Fatalf("expected Tester Agent root-cause FileHint, got: %+v", report.Failures)
+	}
+}
+
+func TestTesterAgentFailsClosedWhenSubmitTestReportNeverCalled(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test-noop",
+			"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": "Looks good"}}},
+		})
+	}))
+	defer srv.Close()
+
+	agent := NewAgent(llm.NewClient(srv.URL, "sk-test-key", 5*time.Second), 32768, stubBackend{
+		pwResult: PlaywrightResult{Passed: true, DurationMs: 900},
+	})
+
+	report, err := agent.Verify(context.Background(), contracts.TestRunInput{
+		IssueNumber: 43,
+		Attempt:     1,
+		Spec:        contracts.WebsiteSpecification{SiteSlug: "kaffeekultur-berlin"},
+	}, "/tmp/wt", nil)
+	if err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+	if report.Passed || report.SemanticQualityOK || len(report.Failures) == 0 {
+		t.Fatalf("expected fail-closed TestReport when submit_test_report is not called, got: %+v", report)
 	}
 }

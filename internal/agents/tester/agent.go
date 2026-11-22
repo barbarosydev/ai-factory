@@ -107,22 +107,6 @@ func (a *Agent) Verify(
 		messages = append(messages, msg)
 
 		if len(msg.ToolCalls) == 0 {
-			if pwRan && lastPW.Passed {
-				summary := strings.TrimSpace(msg.Content)
-				if summary == "" {
-					summary = "All 8 Playwright desktop and mobile gates passed."
-				}
-				return contracts.TestReport{
-					Attempt:           in.Attempt,
-					Passed:            true,
-					SemanticQualityOK: true,
-					DurationMs:        lastPW.DurationMs,
-					Checks:            lastPW.Checks,
-					TesterSummary:     summary,
-					DesktopScreenshot: lastPW.DesktopScreenshot,
-					MobileScreenshot:  lastPW.MobileScreenshot,
-				}, nil
-			}
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: "Call `run_playwright_suite`, inspect files if needed, and then call `submit_test_report`.",
@@ -192,12 +176,10 @@ func (a *Agent) Verify(
 					continue
 				}
 
-				// Ground-truth enforcement: Playwright failures can never be overridden as passing.
-				mergedFailures := lastPW.Failures
-				if len(sub.Failures) > 0 {
-					mergedFailures = sub.Failures
-				}
-				passed := lastPW.Passed && sub.SemanticQualityOK
+				// Ground-truth enforcement: Playwright failures can never be overridden as passing,
+				// and deterministic Playwright failures are always preserved alongside LLM findings.
+				mergedFailures := mergeFailures(lastPW.Failures, sub.Failures)
+				passed := lastPW.Passed && sub.SemanticQualityOK && len(mergedFailures) == 0
 				if !passed && len(mergedFailures) == 0 {
 					mergedFailures = []contracts.FailureEvidence{{
 						CheckName:   "semantic-quality-check",
@@ -225,7 +207,7 @@ func (a *Agent) Verify(
 		}
 	}
 
-	// Deterministic fallback if max turns reached after Playwright already executed.
+	// Fail-closed fallback if max turns reached without calling submit_test_report.
 	if !pwRan {
 		res, err := a.backend.RunPlaywrightSuite(ctx, worktreeDir, in.Spec)
 		if err != nil {
@@ -233,17 +215,48 @@ func (a *Agent) Verify(
 		}
 		lastPW = res
 	}
+	failures := mergeFailures(lastPW.Failures, []contracts.FailureEvidence{{
+		CheckName:   "tester-max-turns",
+		Expected:    "Tester Agent calls submit_test_report with explicit verification verdict",
+		Actual:      fmt.Sprintf("exhausted %d turns without calling submit_test_report", maxTesterTurns),
+		Remediation: "Ensure valid HTML/CSS and re-run verification.",
+	}})
 	return contracts.TestReport{
 		Attempt:           in.Attempt,
-		Passed:            lastPW.Passed,
-		SemanticQualityOK: lastPW.Passed,
+		Passed:            false,
+		SemanticQualityOK: false,
 		DurationMs:        lastPW.DurationMs,
 		Checks:            lastPW.Checks,
-		Failures:          lastPW.Failures,
-		TesterSummary:     "Completed deterministic Playwright verification (fallback summary).",
+		Failures:          failures,
+		TesterSummary:     fmt.Sprintf("Tester Agent exhausted %d turns without calling submit_test_report.", maxTesterTurns),
 		DesktopScreenshot: lastPW.DesktopScreenshot,
 		MobileScreenshot:  lastPW.MobileScreenshot,
 	}, nil
+}
+
+func mergeFailures(base, extra []contracts.FailureEvidence) []contracts.FailureEvidence {
+	var out []contracts.FailureEvidence
+	seen := make(map[string]int)
+	for _, f := range base {
+		key := strings.ToLower(strings.TrimSpace(f.CheckName))
+		seen[key] = len(out)
+		out = append(out, f)
+	}
+	for _, f := range extra {
+		key := strings.ToLower(strings.TrimSpace(f.CheckName))
+		if idx, exists := seen[key]; exists {
+			if strings.TrimSpace(out[idx].FileHint) == "" && strings.TrimSpace(f.FileHint) != "" {
+				out[idx].FileHint = f.FileHint
+			}
+			if strings.TrimSpace(f.Remediation) != "" {
+				out[idx].Remediation = f.Remediation
+			}
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, f)
+	}
+	return out
 }
 
 func appendToolMsg(msgs []llm.Message, tc llm.ToolCall, payload any) []llm.Message {

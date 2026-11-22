@@ -94,3 +94,29 @@ func TestInspectDOMAndScanExternalURLs(t *testing.T) {
 		t.Fatalf("expected 2 external URLs detected, got %v", urls)
 	}
 }
+
+func TestCleanExecEnvStripsSecrets(t *testing.T) {
+	t.Setenv("LITELLM_PM_KEY", "sk-pm-secret")
+	t.Setenv("LITELLM_DEV_KEY", "sk-dev-secret")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_BASE64", "c2VjcmV0")
+	t.Setenv("AI_FACTORY_GIT_TOKEN", "ghs_secret")
+	t.Setenv("CUSTOM_API_TOKEN", "tok_secret")
+
+	env := cleanExecEnv("SITE_SLUG=coffee-shop", "WRITE_EVIDENCE=1")
+	joined := strings.Join(env, "\n")
+
+	for _, forbidden := range []string{
+		"LITELLM_PM_KEY=",
+		"LITELLM_DEV_KEY=",
+		"GITHUB_APP_PRIVATE_KEY_BASE64=",
+		"AI_FACTORY_GIT_TOKEN=",
+		"CUSTOM_API_TOKEN=",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("cleanExecEnv leaked secret env var %q", forbidden)
+		}
+	}
+	if !strings.Contains(joined, "SITE_SLUG=coffee-shop") || !strings.Contains(joined, "WRITE_EVIDENCE=1") {
+		t.Errorf("cleanExecEnv lost explicit extra vars: %s", joined)
+	}
+}

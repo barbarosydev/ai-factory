@@ -94,3 +94,38 @@ func TestReviewerHappyPath(t *testing.T) {
 		t.Fatalf("unexpected ReviewResult: %+v", res)
 	}
 }
+
+func TestReviewerFailsClosedWhenMaxTurnsExhaustedWithoutSubmitReview(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-sec-text",
+			"choices": []map[string]any{{
+				"index": 0,
+				"message": map[string]any{
+					"role":    "assistant",
+					"content": "Looks fine in plain text without calling submit_review.",
+				},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	agent := NewAgent(llm.NewClient(srv.URL, "sk-sec-test", 5*time.Second), 32768, stubInspector{
+		audit: DiffAudit{ChangedFiles: []string{"sites/coffee-shop/index.html"}, PathIsolationOK: true},
+	})
+
+	res, err := agent.Review(context.Background(), contracts.ReviewInput{
+		Issue:      contracts.CustomerIssueInput{IssueNumber: 42},
+		Spec:       contracts.WebsiteSpecification{SiteSlug: "coffee-shop"},
+		TestReport: contracts.TestReport{Passed: true},
+	}, "/tmp/wt")
+	if err != nil {
+		t.Fatalf("Review failed: %v", err)
+	}
+	if res.Approved || len(res.Findings) == 0 {
+		t.Fatalf("expected fail-closed ReviewResult when submit_review is never called, got: %+v", res)
+	}
+}

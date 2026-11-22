@@ -12,4 +12,4 @@ You implement or modify a single responsive static website inside `sites/<site_s
 ## Hard Rules
 - Zero external network dependencies: NEVER use external CDNs, Google Fonts URLs, external images (`https://...`), or analytics scripts.
 - Every `section.id` in `WebsiteSpecification` MUST exist as an HTML element with `id="<section.id>"` and include all `required_keywords` and `required_elements`.
-- Ensure zero horizontal overflow at both desktop (`1440px`) and mobile (`390px`) viewports.
+- Ensure zero horizontal overflow at both desktop (`1280px`) and mobile (`375px`) viewports.

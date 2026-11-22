@@ -43,8 +43,37 @@ type Client struct {
 	repo              string
 	webBaseURL        string
 	existingSites     func() ([]string, error)
+	allowedUsers      []string
 	checkPollInterval time.Duration
 	checkMaxWait      time.Duration
+}
+
+// SetAllowedUsers configures the allowlisted GitHub usernames permitted to enqueue issues
+// and send human clarification replies on a public repository.
+func (c *Client) SetAllowedUsers(users []string) {
+	var clean []string
+	seen := make(map[string]bool, len(users))
+	for _, u := range users {
+		norm := strings.ToLower(strings.TrimSpace(u))
+		if norm != "" && !seen[norm] {
+			seen[norm] = true
+			clean = append(clean, norm)
+		}
+	}
+	c.allowedUsers = clean
+}
+
+func (c *Client) isAllowedUser(login string) bool {
+	if len(c.allowedUsers) == 0 {
+		return true
+	}
+	norm := strings.ToLower(strings.TrimSpace(login))
+	for _, u := range c.allowedUsers {
+		if u == norm {
+			return true
+		}
+	}
+	return false
 }
 
 // NewClient creates a GitHub App client scoped to owner/repo.
@@ -118,12 +147,15 @@ func (c *Client) PollOpenFactoryIssues(ctx context.Context) (PolledWork, error) 
 		if iss.IsPullRequest() {
 			continue
 		}
+		if !c.isAllowedUser(iss.GetUser().GetLogin()) {
+			continue
+		}
 		waitingSeen[iss.GetNumber()] = struct{}{}
 		comments, err := c.listIssueComments(ctx, iss.GetNumber())
 		if err != nil {
 			return PolledWork{}, err
 		}
-		human, latestAfterPrompt := ExtractClarifications(comments)
+		human, latestAfterPrompt := ExtractClarifications(comments, c.allowedUsers...)
 		parsed := ParseIssueForm(iss.GetNumber(), iss.GetTitle(), iss.GetBody(), existing, human)
 		reQueued := hasLabel(iss, "factory:ready")
 		if latestAfterPrompt != nil {
@@ -150,6 +182,9 @@ func (c *Client) PollOpenFactoryIssues(ctx context.Context) (PolledWork, error) 
 		if iss.IsPullRequest() {
 			continue
 		}
+		if !c.isAllowedUser(iss.GetUser().GetLogin()) {
+			continue
+		}
 		if _, alreadyWaiting := waitingSeen[iss.GetNumber()]; alreadyWaiting {
 			continue
 		}
@@ -157,7 +192,7 @@ func (c *Client) PollOpenFactoryIssues(ctx context.Context) (PolledWork, error) 
 		if err != nil {
 			return PolledWork{}, err
 		}
-		human, _ := ExtractClarifications(comments)
+		human, _ := ExtractClarifications(comments, c.allowedUsers...)
 		work.Ready = append(work.Ready, ParseIssueForm(iss.GetNumber(), iss.GetTitle(), iss.GetBody(), existing, human))
 	}
 
@@ -182,6 +217,9 @@ func (c *Client) GetIssue(ctx context.Context, issueNumber int) (contracts.Custo
 	if !strings.EqualFold(iss.GetState(), "open") {
 		return contracts.CustomerIssueInput{}, nil, fmt.Errorf("issue #%d is %s (must be open)", issueNumber, iss.GetState())
 	}
+	if !c.isAllowedUser(iss.GetUser().GetLogin()) {
+		return contracts.CustomerIssueInput{}, nil, fmt.Errorf("issue #%d author %q is not in FACTORY_ALLOWED_GITHUB_USERS", issueNumber, iss.GetUser().GetLogin())
+	}
 
 	existing, err := c.listExistingSites()
 	if err != nil {
@@ -191,7 +229,7 @@ func (c *Client) GetIssue(ctx context.Context, issueNumber int) (contracts.Custo
 	if err != nil {
 		return contracts.CustomerIssueInput{}, nil, err
 	}
-	human, _ := ExtractClarifications(comments)
+	human, _ := ExtractClarifications(comments, c.allowedUsers...)
 	var labels []string
 	for _, lbl := range iss.Labels {
 		labels = append(labels, lbl.GetName())
@@ -517,12 +555,12 @@ func (c *Client) formatPRBody(req activities.PRRequest) string {
 		base := strings.TrimRight(c.webBaseURL, "/")
 		if req.TestReport.DesktopScreenshot != "" {
 			rel := filepath.ToSlash(strings.TrimLeft(req.TestReport.DesktopScreenshot, "/"))
-			fmt.Fprintf(&b, "### Desktop (`1440x900`)\n![Desktop preview](%s/%s/%s/blob/%s/%s?raw=true)\n\n",
+			fmt.Fprintf(&b, "### Desktop (`1280x800`)\n![Desktop preview](%s/%s/%s/blob/%s/%s?raw=true)\n\n",
 				base, c.owner, c.repo, req.CommitSHA, rel)
 		}
 		if req.TestReport.MobileScreenshot != "" {
 			rel := filepath.ToSlash(strings.TrimLeft(req.TestReport.MobileScreenshot, "/"))
-			fmt.Fprintf(&b, "### Mobile (`390x844`)\n![Mobile preview](%s/%s/%s/blob/%s/%s?raw=true)\n",
+			fmt.Fprintf(&b, "### Mobile (`375x812`)\n![Mobile preview](%s/%s/%s/blob/%s/%s?raw=true)\n",
 				base, c.owner, c.repo, req.CommitSHA, rel)
 		}
 	}

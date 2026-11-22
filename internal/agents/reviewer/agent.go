@@ -118,15 +118,6 @@ func (a *Agent) Review(ctx context.Context, in contracts.ReviewInput, worktreeDi
 		msg := resp.Choices[0].Message
 		messages = append(messages, msg)
 		if len(msg.ToolCalls) == 0 {
-			if diffAudit.PathIsolationOK && len(externalURLs) == 0 && in.TestReport.Passed && strings.TrimSpace(msg.Content) != "" {
-				return contracts.ReviewResult{
-					Approved:         true,
-					PathIsolationOK:  true,
-					ExternalAssetsOK: true,
-					SpecFidelityOK:   true,
-					SummaryMarkdown:  strings.TrimSpace(msg.Content),
-				}, nil
-			}
 			messages = append(messages, llm.Message{
 				Role:    "user",
 				Content: "Call `submit_review` with your final audit verdict.",
@@ -183,11 +174,12 @@ func (a *Agent) Review(ctx context.Context, in contracts.ReviewInput, worktreeDi
 	}
 
 	return contracts.ReviewResult{
-		Approved:         true,
+		Approved:         false,
 		PathIsolationOK:  diffAudit.PathIsolationOK,
 		ExternalAssetsOK: len(externalURLs) == 0,
-		SpecFidelityOK:   true,
-		SummaryMarkdown:  fmt.Sprintf("Verified %d files under `sites/%s/` with zero external assets.", len(diffAudit.ChangedFiles), in.Spec.SiteSlug),
+		SpecFidelityOK:   false,
+		SummaryMarkdown:  fmt.Sprintf("Reviewer Agent exhausted %d turns without calling `submit_review`.", maxReviewTurns),
+		Findings:         []string{fmt.Sprintf("reviewer agent exhausted %d turns without submitting an explicit review verdict", maxReviewTurns)},
 	}, nil
 }
 

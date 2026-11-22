@@ -57,11 +57,12 @@ func (e *PlaywrightEvaluator) RunPlaywrightSuite(
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, "npx", "playwright", "test", "--reporter=json")
 	cmd.Dir = e.websitesRepoPath
-	cmd.Env = append(os.Environ(),
+	cmd.Env = cleanExecEnv(
 		"SITE_SLUG="+spec.SiteSlug,
 		"SITE_WORKTREE_ROOT="+worktreeDir,
 		"SITE_SERVER_PORT="+strconv.Itoa(port),
 		"PW_REPORTER=json",
+		"WRITE_EVIDENCE=1",
 	)
 
 	var stdout, stderr bytes.Buffer
@@ -76,7 +77,7 @@ func (e *PlaywrightEvaluator) RunPlaywrightSuite(
 	parsed, parseErr := parsePlaywrightJSON(stdout.Bytes(), elapsedMs, desktopPath, mobilePath)
 	if parseErr != nil {
 		if runErr != nil {
-			return tester.PlaywrightResult{}, fmt.Errorf("playwright invocation failed (%v): %s", runErr, strings.TrimSpace(stderr.String()))
+			return tester.PlaywrightResult{}, fmt.Errorf("playwright invocation failed (%w): %s", runErr, strings.TrimSpace(stderr.String()))
 		}
 		return tester.PlaywrightResult{}, fmt.Errorf("parse playwright json: %w", parseErr)
 	}
@@ -299,6 +300,33 @@ func parsePlaywrightJSON(raw []byte, elapsedMs int64, desktopPng, mobilePng stri
 
 func cleanANSI(s string) string {
 	return strings.TrimSpace(ansiEscapePattern.ReplaceAllString(s, ""))
+}
+
+// cleanExecEnv strips secret environment variables (LiteLLM keys, GitHub App keys/tokens)
+// before spawning external verification subprocesses such as npx playwright.
+func cleanExecEnv(extra ...string) []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		key := entry
+		if idx := strings.IndexByte(entry, '='); idx >= 0 {
+			key = entry[:idx]
+		}
+		upper := strings.ToUpper(key)
+		if strings.HasPrefix(upper, "LITELLM_") ||
+			strings.HasPrefix(upper, "GITHUB_APP_") ||
+			strings.HasPrefix(upper, "GITHUB_INSTALLATION_") ||
+			strings.HasPrefix(upper, "AI_FACTORY_GIT_") ||
+			strings.HasSuffix(upper, "_KEY") ||
+			strings.HasSuffix(upper, "_SECRET") ||
+			strings.HasSuffix(upper, "_TOKEN") ||
+			strings.HasSuffix(upper, "_PASSWORD") ||
+			strings.HasSuffix(upper, "_PEM") ||
+			strings.Contains(upper, "PRIVATE_KEY") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, extra...)
 }
 
 func freeLoopbackPort() (int, error) {

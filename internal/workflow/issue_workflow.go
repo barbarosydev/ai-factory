@@ -94,7 +94,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 			InitialInterval:    3 * time.Second,
 			BackoffCoefficient: 2.0,
 			MaximumInterval:    30 * time.Second,
-			MaximumAttempts:    int32(policy.GitHubMaxRetryAttempts - 1),
+			MaximumAttempts:    int32(policy.AgentMaxRetryAttempts),
 		},
 	}
 	if pmOpts.RetryPolicy.MaximumAttempts < 1 {
@@ -162,6 +162,12 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 	issue := in.Issue
 	var pmOut contracts.PMDecisionOutput
 	humanReplyCh := workflow.GetSignalChannel(ctx, SignalHumanReply)
+	processedComments := make(map[int64]bool)
+	for _, existingComment := range issue.Clarifications {
+		if existingComment.ID > 0 {
+			processedComments[existingComment.ID] = true
+		}
+	}
 
 	for round := 0; round <= policy.MaxClarificationRounds; round++ {
 		status.Stage = "pm_analysis"
@@ -211,16 +217,35 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		timerCtx, cancelTimer := workflow.WithCancel(ctx)
 		timerFuture := workflow.NewTimer(timerCtx, policy.HumanWaitTimeout)
 
-		sel := workflow.NewSelector(ctx)
-		sel.AddReceive(humanReplyCh, func(c workflow.ReceiveChannel, _ bool) {
-			c.Receive(ctx, &reply)
-			cancelTimer()
-		})
-		sel.AddFuture(timerFuture, func(f workflow.Future) {
-			_ = f.Get(ctx, nil)
-			timedOut = true
-		})
-		sel.Select(ctx)
+		for {
+			var candidate HumanReplySignal
+			gotSignal := false
+			sel := workflow.NewSelector(ctx)
+			sel.AddReceive(humanReplyCh, func(c workflow.ReceiveChannel, _ bool) {
+				c.Receive(ctx, &candidate)
+				gotSignal = true
+			})
+			sel.AddFuture(timerFuture, func(f workflow.Future) {
+				_ = f.Get(ctx, nil)
+				timedOut = true
+			})
+			sel.Select(ctx)
+
+			if timedOut {
+				break
+			}
+			if gotSignal {
+				if candidate.CommentID > 0 && processedComments[candidate.CommentID] {
+					continue
+				}
+				if candidate.CommentID > 0 {
+					processedComments[candidate.CommentID] = true
+				}
+				reply = candidate
+				cancelTimer()
+				break
+			}
+		}
 
 		if timedOut {
 			msg := "Timed out waiting " + policy.HumanWaitTimeout.String() + " for human clarification."

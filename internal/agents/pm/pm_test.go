@@ -116,7 +116,7 @@ func TestAnalyzeIssueNormalizesTopLevelSpecAndReasoningFallback(t *testing.T) {
 					"message": map[string]any{
 						"role":              "assistant",
 						"content":           "",
-						"reasoning_content": "Here is the decision JSON:\n```json\n" + fallbackJSON + "\n```",
+						"reasoning_content": "Thinking about schema {status, spec}:\n```json\n" + fallbackJSON + "\n```",
 					},
 				},
 			},
