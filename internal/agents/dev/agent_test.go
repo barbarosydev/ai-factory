@@ -51,7 +51,7 @@ func TestAgentImplementUsesInjectedChatCompleter(t *testing.T) {
 			if turn == 1 {
 				argsBytes, _ := json.Marshal(map[string]string{
 					"index_html": validHTML,
-					"styles_css": "body { margin: 0; font-family: system-ui, sans-serif; }",
+					"styles_css": ":root { --primary: #4A2C2A; --bg: #FAF7F2; } body { margin: 0; color: var(--primary); background: var(--bg); font-family: system-ui, sans-serif; } header, main, footer { padding: 1.5rem; max-width: 72rem; margin: 0 auto; } nav a { color: var(--primary); }",
 					"summary":    "Built authentic coffee shop page",
 				})
 				tc = llm.ToolCall{

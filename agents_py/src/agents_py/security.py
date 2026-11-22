@@ -233,8 +233,25 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
         css = sandbox.read_file("styles.css")
     except FileNotFoundError:
         css = ""
-    if css and EXTERNAL_CSS_URL_RE.search(css):
-        errors.append("styles.css contains an external http(s):// url(...); remove external URLs")
+    if css:
+        if EXTERNAL_CSS_URL_RE.search(css):
+            errors.append(
+                "styles.css contains an external http(s):// url(...); remove external URLs"
+            )
+        if len(css.strip()) < 200 or css.count("{") < 3:
+            errors.append(
+                "styles.css is missing or too minimal (<200 bytes or <3 CSS rules); "
+                "preserve existing CSS or write full responsive rules"
+            )
+        css_lower = css.lower()
+        for label, color in (
+            ("primary_color", spec.theme.primary_color),
+            ("background_color", spec.theme.background_color),
+        ):
+            if color and color.lower() not in css_lower:
+                errors.append(
+                    f"styles.css must apply spec.theme.{label} ({color}) in CSS variables or rules"
+                )
     if EXTERNAL_CSS_URL_RE.search(raw_html):
         errors.append(
             "index.html contains an external http(s):// CSS url(...); remove external URLs"
