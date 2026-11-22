@@ -106,3 +106,45 @@ def test_wrap_untrusted_input() -> None:
     wrapped = wrap_untrusted_input("issue", "hello")
     assert "<untrusted_github_input source='issue'>" in wrapped
     assert "</untrusted_github_input>" in wrapped
+
+
+def test_check_site_structure_enforces_charset_and_utf8_footer(tmp_path: pathlib.Path) -> None:
+    spec = WebsiteSpecification(
+        site_slug="kaffeekultur-berlin",
+        page_title="Kaffeekultur Berlin",
+        footer_text="© 2026 Kaffeekultur Berlin · Oranienstraße 42, 10999 Berlin-Kreuzberg",
+        sections=[
+            SectionSpec(
+                id="hero", heading="Hero", purpose="Intro", required_keywords=["Kreuzberg"]
+            ),
+            SectionSpec(id="menu", heading="Menu", purpose="Drinks"),
+            SectionSpec(id="hours", heading="Hours", purpose="Times"),
+        ],
+    )
+    sb = SiteSandbox(tmp_path / "site")
+    sb.write_file(
+        "index.html",
+        """<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title></head>
+<body>
+  <header><nav><a href="#hero">Hero</a></nav></header>
+  <main>
+    <section id="hero"><h1>Kaffeekultur</h1><p>Kreuzberg</p></section>
+    <section id="menu"><h2>Menu</h2></section>
+    <section id="hours"><h2>Hours</h2></section>
+  </main>
+  <footer>© 2026 Kaffeekultur Berlin · Oranienstrañe 42, 10999 Berlin-Kreuzberg</footer>
+</body>
+</html>""",
+    )
+    res = check_site_structure(sb, spec)
+    assert not res.passed
+    assert any("spec.footer_text" in err for err in res.errors)
+
+    sb.write_file(
+        "index.html",
+        sb.read_file("index.html").replace("Oranienstrañe", "Oranienstraße"),
+    )
+    res_ok = check_site_structure(sb, spec)
+    assert res_ok.passed, res_ok.errors

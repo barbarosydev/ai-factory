@@ -11,6 +11,8 @@ You implement or modify a single responsive static website inside `sites/<site_s
    - Call `list_files` and `read_file` first to inspect existing `index.html` / `styles.css` so you preserve existing custom sections and copy, then update with `write_site_bundle` or `write_file` -> `check_site_structure` -> `finish`.
 
 ## Hard Rules
+- Always include `<meta charset="UTF-8">` and `<meta name="viewport" content="width=device-width, initial-scale=1.0">` in `<head>`.
 - Zero external network dependencies: NEVER use external CDNs, Google Fonts URLs, external images (`https://...`), or analytics scripts.
 - Every `section.id` in `WebsiteSpecification` MUST exist as an HTML element with `id="<section.id>"` and include all `required_keywords` and `required_elements`.
+- Include every `spec.navigation` link in `<nav>` and the exact `spec.footer_text` (preserving UTF-8 characters such as `ß`, `ä`, `ö`, `ü`, `©`) inside `<footer>`.
 - Ensure zero horizontal overflow at both desktop (`1280px`) and mobile (`375px`) viewports.

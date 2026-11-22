@@ -297,7 +297,8 @@ async def run_pm_agent(
     )
     if existing_spec_json:
         user_prompt += (
-            f"\n\nExisting WebsiteSpecification for target_site_slug {issue.target_site_slug!r}:\n"
+            f"\n\nExisting WebsiteSpecification for target_site_slug {issue.target_site_slug!r} "
+            "(preserve exact UTF-8 spelling of page_title, footer_text, navigation, and unchanged sections):\n"
             f"```json\n{existing_spec_json}\n```"
         )
 

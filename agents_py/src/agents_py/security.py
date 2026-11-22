@@ -122,11 +122,13 @@ class _DOMInspector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.has_doctype = False
+        self.has_charset = False
         self.has_viewport = False
         self.has_header_or_nav = False
         self.has_main = False
         self.has_footer = False
         self.title = ""
+        self.footer_text_parts: list[str] = []
         self.ids: set[str] = set()
         self.id_text: dict[str, list[str]] = {}
         self.anchors: list[str] = []
@@ -162,6 +164,11 @@ class _DOMInspector(HTMLParser):
             self._in_heading = True
             self._cur_heading = []
         elif t == "meta":
+            if attr_map.get("charset", "").strip().lower() == "utf-8" or (
+                attr_map.get("http-equiv", "").strip().lower() == "content-type"
+                and "utf-8" in attr_map.get("content", "").lower()
+            ):
+                self.has_charset = True
             if (
                 attr_map.get("name", "").lower() == "viewport"
                 and "width=device-width" in attr_map.get("content", "").lower()
@@ -198,7 +205,9 @@ class _DOMInspector(HTMLParser):
             self.title += data
         if self._in_heading:
             self._cur_heading.append(data)
-        for _, el_id in self._stack:
+        for tag, el_id in self._stack:
+            if tag == "footer":
+                self.footer_text_parts.append(data)
             if el_id:
                 self.id_text.setdefault(el_id, []).append(data)
 
@@ -236,6 +245,8 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
 
     if not parser.has_doctype:
         errors.append("index.html is missing <!DOCTYPE html>")
+    if not parser.has_charset:
+        errors.append('index.html is missing <meta charset="UTF-8">')
     if not parser.has_viewport:
         errors.append(
             'index.html is missing <meta name="viewport" content="width=device-width, initial-scale=1.0">'
@@ -246,6 +257,11 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
         errors.append("index.html must include a <main> landmark")
     if not parser.has_footer:
         errors.append("index.html must include a <footer> landmark")
+    elif spec.footer_text.strip():
+        actual_footer = " ".join(" ".join(parser.footer_text_parts).lower().split())
+        expected_footer = " ".join(spec.footer_text.lower().split())
+        if expected_footer not in actual_footer:
+            errors.append(f"<footer> must include exact spec.footer_text {spec.footer_text!r}")
 
     for kind, ref in parser.asset_refs:
         lower = ref.strip().lower()
@@ -267,6 +283,12 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
                 errors.append(
                     f"broken anchor link href={href!r}: no element with id={target!r} exists"
                 )
+
+    for nav in spec.navigation:
+        if nav.href and nav.href not in parser.anchors:
+            errors.append(
+                f"navigation link {nav.label!r} ({nav.href!r}) is missing from index.html"
+            )
 
     for sec in spec.sections:
         if sec.id not in parser.ids:
