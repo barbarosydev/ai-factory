@@ -6,5 +6,6 @@ Python Temporal Activity Worker for `ai-factory` executing `RunPMAgentActivity`,
 
 ```bash
 uv sync --locked
+uv run mypy src tests
 uv run pytest
 ```

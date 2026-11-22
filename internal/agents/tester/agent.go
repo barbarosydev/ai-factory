@@ -36,14 +36,14 @@ type Backend interface {
 
 // Agent executes independent verification combining Playwright tools with LLM root-cause diagnosis.
 type Agent struct {
-	client    *llm.Client
+	client    llm.ChatCompleter
 	modelName string
 	numCtx    int
 	backend   Backend
 }
 
 // NewAgent constructs a Tester Agent bound to test-agent.
-func NewAgent(client *llm.Client, numCtx int, backend Backend) *Agent {
+func NewAgent(client llm.ChatCompleter, numCtx int, backend Backend) *Agent {
 	if numCtx <= 0 {
 		numCtx = 32768
 	}

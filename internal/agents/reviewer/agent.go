@@ -29,14 +29,14 @@ type Inspector interface {
 
 // Agent performs final security/path isolation audit and composes the PR summary.
 type Agent struct {
-	client    *llm.Client
+	client    llm.ChatCompleter
 	modelName string
 	numCtx    int
 	inspector Inspector
 }
 
 // NewAgent constructs a Reviewer Agent bound to sec-agent.
-func NewAgent(client *llm.Client, numCtx int, inspector Inspector) *Agent {
+func NewAgent(client llm.ChatCompleter, numCtx int, inspector Inspector) *Agent {
 	if numCtx <= 0 {
 		numCtx = 32768
 	}

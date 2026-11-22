@@ -147,6 +147,8 @@ class ImplementationResult(BaseModel):
 
 
 class TestRunInput(BaseModel):
+    __test__ = False
+
     issue_number: int
     attempt: int
     spec: WebsiteSpecification
@@ -158,6 +160,8 @@ class TesterActivityInput(BaseModel):
 
 
 class TestReport(BaseModel):
+    __test__ = False
+
     attempt: int
     passed: bool
     semantic_quality_ok: bool

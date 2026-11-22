@@ -92,6 +92,11 @@ type ChatResponse struct {
 // CompletionObserver receives timing, token usage, and error telemetry for each gateway call.
 type CompletionObserver func(model string, promptTokens, completionTokens int, duration time.Duration, err error)
 
+// ChatCompleter abstracts the LiteLLM / OpenAI chat completion gateway for testability.
+type ChatCompleter interface {
+	ChatCompletion(ctx context.Context, req ChatRequest) (ChatResponse, error)
+}
+
 // Client is a minimal HTTP client for the LiteLLM OpenAI-compatible gateway.
 // Each agent constructs or calls a Client scoped to its own virtual API key.
 type Client struct {

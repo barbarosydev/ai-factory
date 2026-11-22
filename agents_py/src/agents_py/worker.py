@@ -7,8 +7,10 @@ import contextlib
 import logging
 import os
 import signal
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
+from pydantic_ai.models import Model
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -35,7 +37,23 @@ from agents_py.contracts import (
 LOGGER = logging.getLogger("agents_py.worker")
 
 
+ModelFactory = Callable[[str, str, str], Model]
+
+_REQUIRED_KEY_ENV_VARS = (
+    "LITELLM_PM_KEY",
+    "LITELLM_DEV_KEY",
+    "LITELLM_TEST_KEY",
+    "LITELLM_SEC_KEY",
+)
+
+
 def load_model_config_from_env() -> FactoryModelConfig:
+    """Load LiteLLM model endpoints and scoped virtual keys from environment variables."""
+    missing = [name for name in _REQUIRED_KEY_ENV_VARS if not os.environ.get(name, "").strip()]
+    if missing:
+        raise RuntimeError(
+            f"missing required LiteLLM environment variable(s): {', '.join(missing)}"
+        )
     return FactoryModelConfig(
         base_url=os.environ.get("FACTORY_LITELLM_URL", "http://litellm.localhost:8080/v1"),
         pm_key=os.environ["LITELLM_PM_KEY"],
@@ -73,13 +91,18 @@ async def heartbeat_loop(detail: str, interval_s: float = 15.0) -> AsyncIterator
 class PydanticAgentActivities:
     """Temporal activities backed by PydanticAI + MCP workspace tools."""
 
-    def __init__(self, cfg: FactoryModelConfig) -> None:
+    def __init__(
+        self,
+        cfg: FactoryModelConfig,
+        model_factory: ModelFactory = build_litellm_model,
+    ) -> None:
         self.cfg = cfg
+        self._model_factory = model_factory
 
     @activity.defn(name="RunPMAgentActivity")
-    async def run_pm_agent_activity(self, issue_data: dict) -> dict:
+    async def run_pm_agent_activity(self, issue_data: dict[str, Any]) -> dict[str, Any]:
         issue = CustomerIssueInput.model_validate(issue_data)
-        model = build_litellm_model(self.cfg.base_url, self.cfg.pm_key, "pm-agent")
+        model = self._model_factory(self.cfg.base_url, self.cfg.pm_key, "pm-agent")
         async with heartbeat_loop(f"pm analyze issue #{issue.issue_number}"):
             out: PMDecisionOutput = await run_pm_agent(
                 issue, self.cfg.websites_repo_path, model, self.cfg.num_ctx
@@ -87,9 +110,9 @@ class PydanticAgentActivities:
         return out.model_dump()
 
     @activity.defn(name="RunDeveloperAgentActivity")
-    async def run_developer_agent_activity(self, raw_in: dict) -> dict:
+    async def run_developer_agent_activity(self, raw_in: dict[str, Any]) -> dict[str, Any]:
         act_in = DeveloperActivityInput.model_validate(raw_in)
-        model = build_litellm_model(self.cfg.base_url, self.cfg.dev_key, "dev-agent")
+        model = self._model_factory(self.cfg.base_url, self.cfg.dev_key, "dev-agent")
         async with heartbeat_loop(
             f"dev implement {act_in.task.spec.site_slug} (attempt {act_in.task.attempt})"
         ):
@@ -99,9 +122,9 @@ class PydanticAgentActivities:
         return out.model_dump()
 
     @activity.defn(name="RunTesterAgentActivity")
-    async def run_tester_agent_activity(self, raw_in: dict) -> dict:
+    async def run_tester_agent_activity(self, raw_in: dict[str, Any]) -> dict[str, Any]:
         act_in = TesterActivityInput.model_validate(raw_in)
-        model = build_litellm_model(self.cfg.base_url, self.cfg.test_key, "test-agent")
+        model = self._model_factory(self.cfg.base_url, self.cfg.test_key, "test-agent")
         async with heartbeat_loop(
             f"tester verify {act_in.input.spec.site_slug} (attempt {act_in.input.attempt})"
         ):
@@ -111,9 +134,9 @@ class PydanticAgentActivities:
         return out.model_dump()
 
     @activity.defn(name="RunReviewerActivity")
-    async def run_reviewer_agent_activity(self, raw_in: dict) -> dict:
+    async def run_reviewer_agent_activity(self, raw_in: dict[str, Any]) -> dict[str, Any]:
         act_in = ReviewerActivityInput.model_validate(raw_in)
-        model = build_litellm_model(self.cfg.base_url, self.cfg.sec_key, "sec-agent")
+        model = self._model_factory(self.cfg.base_url, self.cfg.sec_key, "sec-agent")
         async with heartbeat_loop(f"reviewing {act_in.input.spec.site_slug}"):
             out: ReviewResult = await run_reviewer_agent(
                 act_in.worktree_dir, act_in.input, self.cfg.websites_repo_path, model

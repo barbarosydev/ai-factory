@@ -49,6 +49,11 @@ if [[ -n "$py_files" ]]; then
   run "ruff format --check" ruff format --check --quiet --config "$REPO_ROOT/agents_py/pyproject.toml" $py_files
 fi
 
+if [[ -f "$REPO_ROOT/agents_py/pyproject.toml" ]]; then
+  require_cmd uv
+  run "mypy (agents_py)" uv run --directory "$REPO_ROOT/agents_py" --locked mypy src tests
+fi
+
 # shellcheck disable=SC2317,SC2329
 yaml_ok() { yq eval 'true' "$1" >/dev/null; }
 while IFS= read -r f; do

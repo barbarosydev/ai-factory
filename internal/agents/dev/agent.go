@@ -19,13 +19,13 @@ type HeartbeatFunc func(detail string)
 
 // Agent implements or modifies static website files inside a sandboxed directory.
 type Agent struct {
-	client    *llm.Client
+	client    llm.ChatCompleter
 	modelName string
 	numCtx    int
 }
 
 // NewAgent constructs a Developer Agent bound to the dev-agent LiteLLM client.
-func NewAgent(client *llm.Client, numCtx int) *Agent {
+func NewAgent(client llm.ChatCompleter, numCtx int) *Agent {
 	if numCtx <= 0 {
 		numCtx = 32768
 	}

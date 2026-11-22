@@ -10,6 +10,7 @@ from agents_py.agents import (
     run_developer_agent,
     run_pm_agent,
     run_reviewer_agent,
+    run_tester_agent,
 )
 from agents_py.contracts import (
     CustomerIssueInput,
@@ -17,9 +18,10 @@ from agents_py.contracts import (
     ReviewInput,
     SectionSpec,
     TestReport,
+    TestRunInput,
     WebsiteSpecification,
 )
-from agents_py.mcp_tools import build_workspace_mcp_server
+from agents_py.mcp_tools import WorkspaceDeps, build_workspace_mcp_server
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -104,7 +106,7 @@ async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None
   <main>
     <section id="hero"><h1>Kaffeekultur</h1><p>Freshly roasted in Kreuzberg.</p></section>
     <section id="menu"><h2>Menu</h2><p>Single-origin Espresso daily.</p></section>
-    <section id="hours"><h2>Hours</h2><p>Mon–Fri 08:00–18:00</p></section>
+    <section id="hours"><h2>Hours</h2><p>Mon-Fri 08:00-18:00</p></section>
   </main>
   <footer>Kaffeekultur Berlin</footer>
 </body>
@@ -217,3 +219,68 @@ async def test_mcp_server_registers_workspace_tools(tmp_path: pathlib.Path) -> N
         "mcp_scan_external_urls",
         "mcp_inspect_git_diff",
     }.issubset(names)
+
+
+async def test_tester_agent_passes_and_fails_closed_with_injected_runner(
+    tmp_path: pathlib.Path,
+) -> None:
+    wt = tmp_path / "wt"
+    site_dir = wt / "sites" / "kaffeekultur-berlin"
+    site_dir.mkdir(parents=True)
+    (site_dir / "index.html").write_text("<h1>Kaffeekultur</h1>", encoding="utf-8")
+
+    async def _passing_pw(_: WorkspaceDeps) -> dict[str, object]:
+        return {
+            "passed": True,
+            "duration_ms": 42,
+            "checks": [{"name": "gate-1", "passed": True, "detail": ""}],
+            "failures": [],
+            "desktop_screenshot_path": "sites/kaffeekultur-berlin/evidence/desktop.png",
+            "mobile_screenshot_path": "sites/kaffeekultur-berlin/evidence/mobile.png",
+        }
+
+    step = 0
+
+    def _tester_happy(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        nonlocal step
+        step += 1
+        if step == 1:
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="run_playwright_suite_tool", args="{}")]
+            )
+        if step == 2:
+            args = json.dumps(
+                {
+                    "semantic_quality_ok": True,
+                    "tester_summary": "All gates passed with authentic copy.",
+                    "failures": [],
+                }
+            )
+            return ModelResponse(parts=[ToolCallPart(tool_name="submit_test_report", args=args)])
+        return ModelResponse(parts=[TextPart("Verified.")])
+
+    report = await run_tester_agent(
+        str(wt),
+        TestRunInput(issue_number=7, attempt=1, spec=_sample_spec()),
+        str(tmp_path),
+        FunctionModel(_tester_happy),
+        playwright_runner=_passing_pw,
+    )
+    assert report.passed
+    assert report.semantic_quality_ok
+    assert report.duration_ms == 42
+
+    # Fail-closed when LLM omits submit_test_report
+    def _tester_forgot_submit(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[TextPart("Looks good without calling tools.")])
+
+    failed_report = await run_tester_agent(
+        str(wt),
+        TestRunInput(issue_number=7, attempt=2, spec=_sample_spec()),
+        str(tmp_path),
+        FunctionModel(_tester_forgot_submit),
+        playwright_runner=_passing_pw,
+    )
+    assert not failed_report.passed
+    assert not failed_report.semantic_quality_ok
+    assert any(f.check_name == "tester-submit-missing" for f in failed_report.failures)

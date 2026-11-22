@@ -26,14 +26,14 @@ type SpecStore interface {
 
 // Agent translates a CustomerIssueInput into a validated PMDecisionOutput.
 type Agent struct {
-	client    *llm.Client
+	client    llm.ChatCompleter
 	modelName string
 	numCtx    int
 	store     SpecStore
 }
 
 // NewAgent constructs a PM / UX Agent bound to the given LiteLLM client.
-func NewAgent(client *llm.Client, numCtx int, store SpecStore) *Agent {
+func NewAgent(client llm.ChatCompleter, numCtx int, store SpecStore) *Agent {
 	if numCtx <= 0 {
 		numCtx = 32768
 	}
