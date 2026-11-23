@@ -25,13 +25,22 @@ EXTERNAL_CSS_URL_RE = re.compile(
 def wrap_untrusted_input(label: str, payload: str) -> str:
     """Wrap untrusted GitHub issue/comment data in explicit boundary tags."""
     safe_label = re.sub(r"[^a-zA-Z0-9_-]", "_", label)
-    return f"<untrusted_github_input source={safe_label!r}>\n{payload}\n</untrusted_github_input>"
+    escaped_payload = payload.replace("<", "&lt;").replace(">", "&gt;")
+    return (
+        f"<untrusted_github_input source={safe_label!r}>\n"
+        f"{escaped_payload}\n"
+        "</untrusted_github_input>"
+    )
 
 
 def clean_exec_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """Strip secret environment variables before spawning child verification processes."""
+    candidate = dict(os.environ)
+    if extra:
+        candidate.update(extra)
+
     cleaned: dict[str, str] = {}
-    for key, val in os.environ.items():
+    for key, val in candidate.items():
         upper = key.upper()
         if (
             upper.startswith(("LITELLM_", "GITHUB_APP_", "GITHUB_INSTALLATION_", "AI_FACTORY_GIT_"))
@@ -40,8 +49,6 @@ def clean_exec_env(extra: dict[str, str] | None = None) -> dict[str, str]:
         ):
             continue
         cleaned[key] = val
-    if extra:
-        cleaned.update(extra)
     return cleaned
 
 
@@ -65,9 +72,12 @@ class SiteSandbox:
     """Confines Developer Agent filesystem operations strictly to sites/<slug>/."""
 
     def __init__(self, site_dir: str | pathlib.Path) -> None:
-        self.root_path = pathlib.Path(site_dir)
-        self.root_path.mkdir(parents=True, exist_ok=True)
-        self.root_real = self.root_path.resolve()
+        requested_root = pathlib.Path(site_dir).absolute()
+        if requested_root.is_symlink() or requested_root.parent.is_symlink():
+            raise ValueError(f"symlinked site sandbox root is forbidden: {requested_root}")
+        requested_root.mkdir(parents=True, exist_ok=True)
+        self.root_real = requested_root.resolve()
+        self.root_path = self.root_real
 
     def _resolve_safe(self, rel: str) -> pathlib.Path:
         clean = sanitize_rel_path(rel)
@@ -362,4 +372,9 @@ def scan_external_urls(sandbox: SiteSandbox) -> list[str]:
 
 def site_dir_for_worktree(worktree_dir: str, slug: str) -> pathlib.Path:
     validate_site_slug(slug)
-    return pathlib.Path(worktree_dir) / "sites" / slug
+    worktree = pathlib.Path(worktree_dir).resolve()
+    sites_dir = worktree / "sites"
+    site_dir = sites_dir / slug
+    if sites_dir.is_symlink() or site_dir.is_symlink():
+        raise ValueError(f"symlinked site path is forbidden: {site_dir}")
+    return site_dir

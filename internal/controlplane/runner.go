@@ -15,14 +15,8 @@ import (
 	"go.temporal.io/sdk/worker"
 
 	"github.com/barbarosydev/ai-factory/internal/activities"
-	"github.com/barbarosydev/ai-factory/internal/agents/dev"
-	"github.com/barbarosydev/ai-factory/internal/agents/llm"
-	"github.com/barbarosydev/ai-factory/internal/agents/pm"
-	"github.com/barbarosydev/ai-factory/internal/agents/reviewer"
-	"github.com/barbarosydev/ai-factory/internal/agents/tester"
 	"github.com/barbarosydev/ai-factory/internal/config"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
-	"github.com/barbarosydev/ai-factory/internal/evaluator"
 	"github.com/barbarosydev/ai-factory/internal/githubapp"
 	"github.com/barbarosydev/ai-factory/internal/gitworktree"
 	"github.com/barbarosydev/ai-factory/internal/telemetry"
@@ -35,23 +29,6 @@ type RunOptions struct {
 	SkipRemoteCI bool
 	Once         bool
 	IssueNumber  int
-}
-
-type inspectorAdapter struct {
-	git *gitworktree.Manager
-	ev  *evaluator.PlaywrightEvaluator
-}
-
-func (a inspectorAdapter) InspectGitDiff(ctx context.Context, worktreeDir, slug string) (reviewer.DiffAudit, error) {
-	return a.git.InspectGitDiff(ctx, worktreeDir, slug)
-}
-
-func (a inspectorAdapter) ScanExternalURLs(worktreeDir, slug string) ([]string, error) {
-	return a.ev.ScanExternalURLs(worktreeDir, slug)
-}
-
-func (a inspectorAdapter) ReadSiteFile(worktreeDir, slug, relPath string) (string, error) {
-	return a.ev.ReadSiteFile(worktreeDir, slug, relPath)
 }
 
 // Run starts the Temporal worker and single-issue GitHub App poller until signaled to stop (or once completes).
@@ -82,22 +59,10 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 		return err
 	}
 	gitMgr = gitworktree.NewManager(cfg.WebsitesRepoPath, cfg.GitHubAppID, auth.Token)
-	ev := evaluator.NewPlaywrightEvaluator(cfg.WebsitesRepoPath)
-
-	pmAgent := pm.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.PMKey, "pm", reg, logger), cfg.NumCtx, gitMgr)
-	devAgent := dev.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.DevKey, "dev", reg, logger), cfg.NumCtx)
-	testAgent := tester.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.TestKey, "tester", reg, logger), cfg.NumCtx, ev)
-	revAgent := reviewer.NewAgent(observedLLMClient(cfg.LiteLLMBaseURL, cfg.SecKey, "reviewer", reg, logger), cfg.NumCtx, inspectorAdapter{git: gitMgr, ev: ev})
 
 	acts := &activities.FactoryActivities{
-		PM:                pmAgent,
-		Dev:               devAgent,
-		Tester:            testAgent,
-		Reviewer:          revAgent,
-		Git:               gitMgr,
-		GitHub:            ghClient,
-		Metrics:           reg,
-		HeartbeatInterval: cfg.Policy.HeartbeatInterval,
+		Git:    gitMgr,
+		GitHub: ghClient,
 	}
 
 	tc, err := client.Dial(client.Options{
@@ -128,7 +93,6 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	logger.Info("ai-factory worker started",
 		"temporal", cfg.TemporalAddress,
 		"queue", cfg.TaskQueue,
-		"agent_runtime", cfg.AgentRuntime,
 		"agent_queue", cfg.AgentTaskQueue,
 		"repo", cfg.GitHubOwner+"/"+cfg.GitHubRepo,
 		"mode", opts.AutonomyMode,
@@ -139,24 +103,6 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 		return runOnce(ctx, cfg, tc, ghClient, opts, reg, logger, out)
 	}
 	return runPoller(ctx, cfg, tc, ghClient, opts, reg, logger, out)
-}
-
-func observedLLMClient(baseURL, apiKey, role string, reg *telemetry.Registry, logger *slog.Logger) *llm.Client {
-	c := llm.NewClient(baseURL, apiKey, 30*time.Minute)
-	c.SetObserver(func(model string, promptTok, compTok int, d time.Duration, err error) {
-		reg.RecordAgentCall(role, model, promptTok, compTok, d, err)
-		if logger != nil {
-			logger.Info("llm call completed",
-				"role", role,
-				"model", model,
-				"duration_ms", d.Milliseconds(),
-				"prompt_tokens", promptTok,
-				"completion_tokens", compTok,
-				"error", err != nil,
-			)
-		}
-	})
-	return c
 }
 
 func runOnce(
@@ -438,11 +384,6 @@ func ensureStartedOrSignaled(
 		return runID, nil
 	}
 
-	agentQueue := ""
-	if cfg.AgentRuntime == "pydanticai" {
-		agentQueue = cfg.AgentTaskQueue
-	}
-
 	run, err := tc.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
 		ID:                    wfID,
 		TaskQueue:             cfg.TaskQueue,
@@ -452,7 +393,7 @@ func ensureStartedOrSignaled(
 		AutonomyMode:   opts.AutonomyMode,
 		SkipRemoteCI:   opts.SkipRemoteCI,
 		Policy:         cfg.Policy,
-		AgentTaskQueue: agentQueue,
+		AgentTaskQueue: cfg.AgentTaskQueue,
 	})
 	if err != nil {
 		return "", err

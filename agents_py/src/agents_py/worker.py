@@ -63,7 +63,6 @@ def load_model_config_from_env() -> FactoryModelConfig:
         websites_repo_path=os.path.abspath(
             os.environ.get("FACTORY_WEBSITES_REPO", "../ai-factory-websites")
         ),
-        num_ctx=int(os.environ.get("FACTORY_NUM_CTX", "32768")),
     )
 
 
@@ -89,7 +88,7 @@ async def heartbeat_loop(detail: str, interval_s: float = 15.0) -> AsyncIterator
 
 
 class PydanticAgentActivities:
-    """Temporal activities backed by PydanticAI + MCP workspace tools."""
+    """Temporal activities backed by PydanticAI agents and workspace tools."""
 
     def __init__(
         self,
@@ -104,9 +103,7 @@ class PydanticAgentActivities:
         issue = CustomerIssueInput.model_validate(issue_data)
         model = self._model_factory(self.cfg.base_url, self.cfg.pm_key, "pm-agent")
         async with heartbeat_loop(f"pm analyze issue #{issue.issue_number}"):
-            out: PMDecisionOutput = await run_pm_agent(
-                issue, self.cfg.websites_repo_path, model, self.cfg.num_ctx
-            )
+            out: PMDecisionOutput = await run_pm_agent(issue, self.cfg.websites_repo_path, model)
         return out.model_dump()
 
     @activity.defn(name="RunDeveloperAgentActivity")

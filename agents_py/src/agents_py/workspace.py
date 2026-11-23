@@ -1,4 +1,4 @@
-"""Standardized MCP toolset and workspace execution helpers for PydanticAI agents."""
+"""Workspace tools and local Playwright execution for PydanticAI agents."""
 
 from __future__ import annotations
 
@@ -10,16 +10,13 @@ import socket
 import subprocess
 import time
 from dataclasses import dataclass, field
-
-from mcp.server.mcpserver import MCPServer
+from typing import Any
 
 from agents_py.contracts import FailureEvidence, SingleCheck, WebsiteSpecification
 from agents_py.security import (
     SiteSandbox,
     check_site_structure,
     clean_exec_env,
-    inspect_dom_snapshot,
-    scan_external_urls,
     site_dir_for_worktree,
 )
 
@@ -35,7 +32,7 @@ class WorkspaceDeps:
     spec: WebsiteSpecification
     changed_files: set[str] = field(default_factory=set)
     tool_trace: list[str] = field(default_factory=list)
-    last_pw_result: dict | None = None
+    last_pw_result: dict[str, Any] | None = None
 
     def sandbox(self) -> SiteSandbox:
         return SiteSandbox(site_dir_for_worktree(self.worktree_dir, self.spec.site_slug))
@@ -131,7 +128,7 @@ def parse_playwright_json(raw: str, elapsed_ms: int, desktop_png: str, mobile_pn
     }
 
 
-async def run_playwright_suite(deps: WorkspaceDeps) -> dict:
+async def run_playwright_suite(deps: WorkspaceDeps) -> dict[str, Any]:
     """Write spec.json into the worktree and run Playwright with clean_exec_env()."""
     site_dir = site_dir_for_worktree(deps.worktree_dir, deps.spec.site_slug)
     site_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +190,7 @@ async def run_playwright_suite(deps: WorkspaceDeps) -> dict:
     return parsed
 
 
-def inspect_git_diff(worktree_dir: str, slug: str) -> dict:
+def inspect_git_diff(worktree_dir: str, slug: str) -> dict[str, Any]:
     """Verify via git status --porcelain that only files inside sites/<slug>/ changed."""
     clean_env = {k: v for k, v in clean_exec_env().items() if not k.startswith("GIT_")}
     status_proc = subprocess.run(
@@ -232,53 +229,6 @@ def inspect_git_diff(worktree_dir: str, slug: str) -> dict:
     }
 
 
-def build_workspace_mcp_server(worktree_dir: str, slug: str, websites_repo_path: str) -> MCPServer:
-    """Construct a standard MCP server exposing sandboxed site tools over stdio."""
-    mcp = MCPServer("ai-factory-workspace")
-    sandbox = SiteSandbox(site_dir_for_worktree(worktree_dir, slug))
-
-    @mcp.tool()
-    def mcp_read_template() -> dict[str, str]:
-        """Read the reference _template HTML and CSS files."""
-        return read_template_files(websites_repo_path)
-
-    @mcp.tool()
-    def mcp_list_files() -> list[str]:
-        """List files inside the sandboxed site directory."""
-        return sandbox.list_files()
-
-    @mcp.tool()
-    def mcp_read_file(path: str) -> str:
-        """Read a file inside the sandboxed site directory."""
-        return sandbox.read_file(path)
-
-    @mcp.tool()
-    def mcp_inspect_dom() -> str:
-        """Return a concise DOM summary of index.html."""
-        return inspect_dom_snapshot(sandbox)
-
-    @mcp.tool()
-    def mcp_scan_external_urls() -> list[str]:
-        """Scan site files for disallowed external URLs."""
-        return scan_external_urls(sandbox)
-
-    @mcp.tool()
-    def mcp_inspect_git_diff() -> dict:
-        """Verify git diff path isolation inside sites/<slug>/."""
-        return inspect_git_diff(worktree_dir, slug)
-
-    return mcp
-
-
-def create_site_structure_result_dict(deps: WorkspaceDeps) -> dict:
+def create_site_structure_result_dict(deps: WorkspaceDeps) -> dict[str, Any]:
     res = check_site_structure(deps.sandbox(), deps.spec)
     return {"passed": res.passed, "errors": res.errors}
-
-
-if __name__ == "__main__":
-    import os
-
-    wt = os.environ.get("FACTORY_WORKTREE_DIR", os.getcwd())
-    sl = os.environ.get("FACTORY_SITE_SLUG", "_template")
-    repo = os.environ.get("FACTORY_WEBSITES_REPO", "../ai-factory-websites")
-    build_workspace_mcp_server(wt, sl, repo).run()

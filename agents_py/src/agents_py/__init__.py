@@ -1,1 +1,1 @@
-"""PydanticAI + MCP Temporal Activity Worker for ai-factory."""
+"""PydanticAI Temporal Activity Worker for ai-factory."""

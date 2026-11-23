@@ -8,7 +8,8 @@ This guide walks through how a requester ("customer") submits work via GitHub Is
 sequenceDiagram
   actor Customer as GitHub Requester
   participant GH as ai-factory-websites (GitHub)
-  participant Poller as Go Poller & Worker
+  participant Poller as Go Poller & Control Worker
+  participant Agents as Python PydanticAI Worker
   participant Temporal as Temporal (k3d + Postgres)
   participant PM as pm-agent (gemma4:12b)
   participant Dev as dev-agent (gemma4:e4b)
@@ -34,12 +35,13 @@ sequenceDiagram
   end
 
   PM-->>Temporal: status = ready + WebsiteSpecification
-  Temporal->>Dev: Scaffold / edit site inside os.OpenRoot worktree
-  Temporal->>Test: Execute 8 Playwright gates (1280x800 & 375x812)
+  Temporal->>Agents: Run PydanticAI PM / Developer / Tester / Reviewer activities
+  Agents->>Dev: Scaffold / edit site inside SiteSandbox
+  Agents->>Test: Execute 8 Playwright gates (1280x800 & 375x812)
   loop Bounded repair (max 3 attempts on failures)
     Dev->>Test: Apply FailureEvidence remediation & re-verify
   end
-  Temporal->>Sec: Audit git diff isolation, URL scan, & PR summary
+  Agents->>Sec: Audit git diff isolation, URL scan, & PR summary
   Temporal->>GH: Push branch, open PR with ?raw=true screenshots
 
   alt review mode (default)
@@ -101,7 +103,7 @@ task doctor   # verifies Websites repo/Playwright, Temporal gRPC, 4 scoped LiteL
 | **Cleanup Snapshots** | `task clean:failed` | Deletes archived `.worktrees/issue-*-failed-*` debugging folders |
 
 ### 4. Inspect Live Telemetry
-- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and activity heartbeats.
+- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and Python activity heartbeats. The system does not currently propagate OpenTelemetry traces to Phoenix.
 - **LiteLLM Admin UI**: `http://litellm.localhost:8080/ui` — filter per-issue & per-agent completions via `X-Litellm-Tag` (`issue-<N>`, `role-pm`, `role-dev`, `role-test`, `role-sec`).
 
 ---

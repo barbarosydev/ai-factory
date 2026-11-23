@@ -11,6 +11,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
@@ -46,14 +47,34 @@ func sampleSpec() *contracts.WebsiteSpecification {
 func registerBaseActivities(env *testsuite.TestWorkflowEnvironment) *activities.FactoryActivities {
 	var a *activities.FactoryActivities
 	env.RegisterActivity(a.TransitionIssueStateActivity)
-	env.RegisterActivity(a.RunPMAgentActivity)
 	env.RegisterActivity(a.PrepareWorktreeActivity)
-	env.RegisterActivity(a.RunDeveloperAgentActivity)
-	env.RegisterActivity(a.RunTesterAgentActivity)
-	env.RegisterActivity(a.RunReviewerActivity)
 	env.RegisterActivity(a.PublishPullRequestActivity)
 	env.RegisterActivity(a.AwaitChecksAndMergeActivity)
 	env.RegisterActivity(a.CleanupWorktreeActivity)
+	env.RegisterActivityWithOptions(
+		func(context.Context, contracts.CustomerIssueInput) (contracts.PMDecisionOutput, error) {
+			return contracts.PMDecisionOutput{}, nil
+		},
+		activity.RegisterOptions{Name: "RunPMAgentActivity"},
+	)
+	env.RegisterActivityWithOptions(
+		func(context.Context, activities.DeveloperActivityInput) (contracts.ImplementationResult, error) {
+			return contracts.ImplementationResult{}, nil
+		},
+		activity.RegisterOptions{Name: "RunDeveloperAgentActivity"},
+	)
+	env.RegisterActivityWithOptions(
+		func(context.Context, activities.TesterActivityInput) (contracts.TestReport, error) {
+			return contracts.TestReport{}, nil
+		},
+		activity.RegisterOptions{Name: "RunTesterAgentActivity"},
+	)
+	env.RegisterActivityWithOptions(
+		func(context.Context, activities.ReviewerActivityInput) (contracts.ReviewResult, error) {
+			return contracts.ReviewResult{}, nil
+		},
+		activity.RegisterOptions{Name: "RunReviewerActivity"},
+	)
 	return a
 }
 
@@ -65,14 +86,14 @@ func TestWorkflowHappyPathRepairAndAutoMerge(t *testing.T) {
 	a := registerBaseActivities(env)
 
 	env.OnActivity(a.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
-	env.OnActivity(a.RunPMAgentActivity, mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{
+	env.OnActivity("RunPMAgentActivity", mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{
 		Status: "ready",
 		Spec:   sampleSpec(),
 	}, nil)
 	env.OnActivity(a.PrepareWorktreeActivity, mock.Anything, mock.Anything).Return("/tmp/wt/issue-42", nil)
 
 	var devAttempts atomic.Int32
-	env.OnActivity(a.RunDeveloperAgentActivity, mock.Anything, mock.Anything).Return(func(_ context.Context, in activities.DeveloperActivityInput) (contracts.ImplementationResult, error) {
+	env.OnActivity("RunDeveloperAgentActivity", mock.Anything, mock.Anything).Return(func(_ context.Context, in activities.DeveloperActivityInput) (contracts.ImplementationResult, error) {
 		devAttempts.Add(1)
 		if in.Task.Attempt == 2 && len(in.Task.PriorFailures) == 0 {
 			t.Error("expected Attempt 2 to receive Attempt 1 FailureEvidence")
@@ -80,7 +101,7 @@ func TestWorkflowHappyPathRepairAndAutoMerge(t *testing.T) {
 		return contracts.ImplementationResult{Attempt: in.Task.Attempt, FilesChanged: []string{"index.html", "styles.css"}}, nil
 	})
 
-	env.OnActivity(a.RunTesterAgentActivity, mock.Anything, mock.Anything).Return(func(_ context.Context, in activities.TesterActivityInput) (contracts.TestReport, error) {
+	env.OnActivity("RunTesterAgentActivity", mock.Anything, mock.Anything).Return(func(_ context.Context, in activities.TesterActivityInput) (contracts.TestReport, error) {
 		if in.Input.Attempt == 1 {
 			return contracts.TestReport{
 				Attempt: 1,
@@ -96,7 +117,7 @@ func TestWorkflowHappyPathRepairAndAutoMerge(t *testing.T) {
 		return contracts.TestReport{Attempt: 2, Passed: true, SemanticQualityOK: true}, nil
 	})
 
-	env.OnActivity(a.RunReviewerActivity, mock.Anything, mock.Anything).Return(contracts.ReviewResult{
+	env.OnActivity("RunReviewerActivity", mock.Anything, mock.Anything).Return(contracts.ReviewResult{
 		Approved:         true,
 		PathIsolationOK:  true,
 		ExternalAssetsOK: true,
@@ -158,7 +179,7 @@ func TestWorkflowHumanClarificationSignalResume(t *testing.T) {
 	env.OnActivity(a.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
 
 	var pmCalls atomic.Int32
-	env.OnActivity(a.RunPMAgentActivity, mock.Anything, mock.Anything).Return(func(_ context.Context, issue contracts.CustomerIssueInput) (contracts.PMDecisionOutput, error) {
+	env.OnActivity("RunPMAgentActivity", mock.Anything, mock.Anything).Return(func(_ context.Context, issue contracts.CustomerIssueInput) (contracts.PMDecisionOutput, error) {
 		if pmCalls.Add(1) == 1 {
 			return contracts.PMDecisionOutput{
 				Status:                 "needs_clarification",
@@ -172,9 +193,9 @@ func TestWorkflowHumanClarificationSignalResume(t *testing.T) {
 	})
 
 	env.OnActivity(a.PrepareWorktreeActivity, mock.Anything, mock.Anything).Return("/tmp/wt/issue-43", nil)
-	env.OnActivity(a.RunDeveloperAgentActivity, mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
-	env.OnActivity(a.RunTesterAgentActivity, mock.Anything, mock.Anything).Return(contracts.TestReport{Attempt: 1, Passed: true, SemanticQualityOK: true}, nil)
-	env.OnActivity(a.RunReviewerActivity, mock.Anything, mock.Anything).Return(contracts.ReviewResult{Approved: true, PathIsolationOK: true, ExternalAssetsOK: true}, nil)
+	env.OnActivity("RunDeveloperAgentActivity", mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
+	env.OnActivity("RunTesterAgentActivity", mock.Anything, mock.Anything).Return(contracts.TestReport{Attempt: 1, Passed: true, SemanticQualityOK: true}, nil)
+	env.OnActivity("RunReviewerActivity", mock.Anything, mock.Anything).Return(contracts.ReviewResult{Approved: true, PathIsolationOK: true, ExternalAssetsOK: true}, nil)
 	env.OnActivity(a.PublishPullRequestActivity, mock.Anything, mock.Anything).Return(activities.PRResult{Number: 8, URL: "https://example/pull/8"}, nil)
 	env.OnActivity(a.CleanupWorktreeActivity, mock.Anything, mock.Anything).Return(nil)
 
@@ -222,7 +243,7 @@ func TestWorkflowRejectionAndRepairExhaustion(t *testing.T) {
 	env1 := suite1.NewTestWorkflowEnvironment()
 	a1 := registerBaseActivities(env1)
 	env1.OnActivity(a1.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
-	env1.OnActivity(a1.RunPMAgentActivity, mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{
+	env1.OnActivity("RunPMAgentActivity", mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{
 		Status:          "rejected",
 		RejectionReason: "Stripe checkout and login accounts are out of scope for v1.",
 	}, nil)
@@ -242,10 +263,10 @@ func TestWorkflowRejectionAndRepairExhaustion(t *testing.T) {
 	env2 := suite2.NewTestWorkflowEnvironment()
 	a2 := registerBaseActivities(env2)
 	env2.OnActivity(a2.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
-	env2.OnActivity(a2.RunPMAgentActivity, mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil)
+	env2.OnActivity("RunPMAgentActivity", mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil)
 	env2.OnActivity(a2.PrepareWorktreeActivity, mock.Anything, mock.Anything).Return("/tmp/wt/issue-45", nil)
-	env2.OnActivity(a2.RunDeveloperAgentActivity, mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
-	env2.OnActivity(a2.RunTesterAgentActivity, mock.Anything, mock.Anything).Return(contracts.TestReport{
+	env2.OnActivity("RunDeveloperAgentActivity", mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
+	env2.OnActivity("RunTesterAgentActivity", mock.Anything, mock.Anything).Return(contracts.TestReport{
 		Attempt:  1,
 		Passed:   false,
 		Failures: []contracts.FailureEvidence{{CheckName: "missing-section"}},
@@ -272,10 +293,10 @@ func TestWorkflowRejectionAndRepairExhaustion(t *testing.T) {
 	env3 := suite3.NewTestWorkflowEnvironment()
 	a3 := registerBaseActivities(env3)
 	env3.OnActivity(a3.TransitionIssueStateActivity, mock.Anything, mock.Anything).Return(nil)
-	env3.OnActivity(a3.RunPMAgentActivity, mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil)
+	env3.OnActivity("RunPMAgentActivity", mock.Anything, mock.Anything).Return(contracts.PMDecisionOutput{Status: "ready", Spec: sampleSpec()}, nil)
 	env3.OnActivity(a3.PrepareWorktreeActivity, mock.Anything, mock.Anything).Return("/tmp/wt/issue-46", nil)
-	env3.OnActivity(a3.RunDeveloperAgentActivity, mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
-	env3.OnActivity(a3.RunTesterAgentActivity, mock.Anything, mock.Anything).Return(contracts.TestReport{
+	env3.OnActivity("RunDeveloperAgentActivity", mock.Anything, mock.Anything).Return(contracts.ImplementationResult{Attempt: 1}, nil)
+	env3.OnActivity("RunTesterAgentActivity", mock.Anything, mock.Anything).Return(contracts.TestReport{
 		Attempt:  1,
 		Passed:   false,
 		Failures: []contracts.FailureEvidence{{CheckName: "missing-section"}},

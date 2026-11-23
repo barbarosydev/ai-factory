@@ -10,7 +10,7 @@ require_cmd go git node
 "$REPO_ROOT/scripts/build.sh" >/dev/null
 load_factory_runtime_env
 
-runtime="${FACTORY_AGENT_RUNTIME:-pydanticai}"
+require_cmd uv
 py_pid=""
 cleanup_py_worker() {
   if [[ -n "$py_pid" ]] && kill -0 "$py_pid" 2>/dev/null; then
@@ -18,13 +18,10 @@ cleanup_py_worker() {
     wait "$py_pid" 2>/dev/null || true
   fi
 }
-
-if [[ "$runtime" == "pydanticai" ]]; then
-  require_cmd uv
-  trap cleanup_py_worker EXIT INT TERM
-  info "starting PydanticAI + MCP Temporal worker (queue=${FACTORY_AGENT_TASK_QUEUE:-ai-factory-agents})"
+trap cleanup_py_worker EXIT INT TERM
+info "starting PydanticAI Temporal worker (queue=${FACTORY_AGENT_TASK_QUEUE:-ai-factory-agents})"
+env -u GITHUB_APP_PRIVATE_KEY_BASE64 \
   uv run --project "$REPO_ROOT/agents_py" --locked python -m agents_py.worker &
-  py_pid="$!"
-fi
+py_pid="$!"
 
 "$REPO_ROOT/bin/factory" run "$@"

@@ -1,4 +1,4 @@
-"""Tests for PydanticAI agents, context compaction, fail-closed QA, and MCP tools."""
+"""Tests for PydanticAI agents, context compaction, and fail-closed QA."""
 
 import asyncio
 import json
@@ -21,7 +21,7 @@ from agents_py.contracts import (
     TestRunInput,
     WebsiteSpecification,
 )
-from agents_py.mcp_tools import WorkspaceDeps, build_workspace_mcp_server
+from agents_py.workspace import WorkspaceDeps
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -96,6 +96,12 @@ async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None
 
     def _dev_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         nonlocal call_count
+        assert any(
+            isinstance(part, UserPromptPart)
+            and "<untrusted_github_input source='developer_task'>" in str(part.content)
+            for message in messages
+            for part in message.parts
+        )
         call_count += 1
         if call_count == 1:
             html = """<!DOCTYPE html>
@@ -162,6 +168,42 @@ def test_compact_tool_history_trims_old_writes() -> None:
     assert "compacted" in str(part.args)
 
 
+async def test_developer_agent_compacts_history_during_tool_loop(tmp_path: pathlib.Path) -> None:
+    wt = tmp_path / "wt"
+    repo = tmp_path / "repo"
+    (repo / "sites" / "_template").mkdir(parents=True)
+    observed_compaction = False
+    step = 0
+
+    def _dev_model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        nonlocal observed_compaction, step
+        if step >= 4:
+            old_response = messages[3]
+            assert isinstance(old_response, ModelResponse)
+            old_call = old_response.parts[0]
+            assert isinstance(old_call, ToolCallPart)
+            observed_compaction = "compacted" in str(old_call.args)
+            return ModelResponse(parts=[TextPart("Done.")])
+        step += 1
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="write_file",
+                    args=json.dumps({"path": f"extra-{step}.html", "content": "x" * 1000}),
+                    tool_call_id=f"write-{step}",
+                )
+            ]
+        )
+
+    await run_developer_agent(
+        str(wt),
+        DeveloperTaskInput(issue_number=6, attempt=1, spec=_sample_spec()),
+        str(repo),
+        FunctionModel(_dev_model),
+    )
+    assert observed_compaction
+
+
 async def test_reviewer_blocks_path_escape_and_fails_closed(tmp_path: pathlib.Path) -> None:
     wt = tmp_path / "wt"
     wt.mkdir()
@@ -212,18 +254,54 @@ async def test_reviewer_blocks_path_escape_and_fails_closed(tmp_path: pathlib.Pa
     assert res2.findings
 
 
-async def test_mcp_server_registers_workspace_tools(tmp_path: pathlib.Path) -> None:
-    mcp = build_workspace_mcp_server(str(tmp_path), "kaffeekultur-berlin", str(tmp_path))
-    tools = await mcp.list_tools()
-    names = {t.name for t in tools}
-    assert {
-        "mcp_read_template",
-        "mcp_list_files",
-        "mcp_read_file",
-        "mcp_inspect_dom",
-        "mcp_scan_external_urls",
-        "mcp_inspect_git_diff",
-    }.issubset(names)
+async def test_reviewer_rejects_non_fidelity_approval(tmp_path: pathlib.Path) -> None:
+    wt = tmp_path / "wt"
+    site_dir = wt / "sites" / "kaffeekultur-berlin"
+    site_dir.mkdir(parents=True)
+    await asyncio.to_thread(subprocess.run, ["git", "init", "-q", str(wt)], check=True)
+    (site_dir / "index.html").write_text("<h1>Kaffeekultur</h1>", encoding="utf-8")
+
+    called = False
+
+    def _approve_without_fidelity(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        nonlocal called
+        if called:
+            return ModelResponse(parts=[TextPart("Review complete.")])
+        called = True
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="submit_review",
+                    args=json.dumps(
+                        {
+                            "approved": True,
+                            "spec_fidelity_ok": False,
+                            "summary_markdown": "Review passed.",
+                            "findings": [],
+                        }
+                    ),
+                    tool_call_id="review-1",
+                )
+            ]
+        )
+
+    result = await run_reviewer_agent(
+        str(wt),
+        ReviewInput(
+            issue=CustomerIssueInput(issue_number=2, issue_title="t", issue_body="b"),
+            spec=_sample_spec(),
+            test_report=TestReport(attempt=1, passed=True, semantic_quality_ok=True),
+        ),
+        str(tmp_path),
+        FunctionModel(_approve_without_fidelity),
+        diff_inspector=lambda *_: {
+            "changed_files": ["sites/kaffeekultur-berlin/index.html"],
+            "path_isolation_ok": True,
+            "diff_stat": "1 file changed",
+        },
+    )
+    assert not result.approved
+    assert not result.spec_fidelity_ok
 
 
 async def test_tester_agent_passes_and_fails_closed_with_injected_runner(
@@ -248,6 +326,12 @@ async def test_tester_agent_passes_and_fails_closed_with_injected_runner(
 
     def _tester_happy(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         nonlocal step
+        assert any(
+            isinstance(part, UserPromptPart)
+            and "<untrusted_github_input source='test_input'>" in str(part.content)
+            for message in messages
+            for part in message.parts
+        )
         step += 1
         if step == 1:
             return ModelResponse(

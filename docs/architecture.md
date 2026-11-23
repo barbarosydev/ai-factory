@@ -1,6 +1,6 @@
 # ai-factory Architecture
 
-`ai-factory` is the Go control plane, Temporal worker, agent orchestrator, and GitHub App poller for the local AI Software Factory. It runs natively on macOS and connects [`ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra) (`temporal.localhost:7233`, `http://litellm.localhost:8080/v1`) with [`ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites).
+`ai-factory` combines a Go control plane and a PydanticAI Python activity worker for the local AI Software Factory. It runs natively on macOS and connects [`ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra) (`temporal.localhost:7233`, `http://litellm.localhost:8080/v1`) with [`ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites).
 
 ## Three-Repository System View
 
@@ -16,24 +16,24 @@ flowchart LR
     LITE --> OLLAMA
   end
 
-  subgraph FACTORY["ai-factory (Polyglot Temporal Workers)"]
+  subgraph FACTORY["ai-factory (Go Control Plane + Python Agents)"]
     POLLER["FIFO Issue & Comment Poller (15s + Actor Allowlist)"]
     WORKER["Go Control Worker (ai-factory-v1: Workflow, Git, GitHub)"]
-    PYWORKER["PydanticAI + MCP Worker (ai-factory-agents: pm, dev, test, sec)"]
+    PYWORKER["PydanticAI Worker (ai-factory-agents: pm, dev, test, sec)"]
     POLLER --> TEMP
     TEMP <--> WORKER
-    TEMP <-->|FACTORY_AGENT_RUNTIME=pydanticai| PYWORKER
+    TEMP <-->|agent activity tasks| PYWORKER
     PYWORKER -->|Per-agent virtual keys| LITE
   end
 
   subgraph TARGET["ai-factory-websites (Target Monorepo)"]
     ISSUES["GitHub Issues & factory:* Labels"]
-    WT[".worktrees/issue-N/sites/<slug>/ (os.OpenRoot)"]
+    WT[".worktrees/issue-N/sites/<slug>/ (SiteSandbox)"]
     PW["Root @playwright/test Suite (8 gates)"]
     PRS["PRs + ?raw=true Screenshots + CI"]
     POLLER <-->|GitHub App JWT + Token| ISSUES
-    AGENTS --> WT
-    AGENTS --> PW
+    PYWORKER --> WT
+    PYWORKER --> PW
     WORKER -->|GIT_ASKPASS + go-github| PRS
   end
 ```
@@ -60,16 +60,16 @@ stateDiagram-v2
 
 | Package | Responsibility | Key Files |
 | --- | --- | --- |
-| **`cmd/factory`** | CLI (`doctor`, `run`, `once`, `status`, `clean-failed`) & unified runtime flag handling | [main.go](../cmd/factory/main.go) |
+| **`cmd/factory`** | CLI (`doctor`, `run`, `once`, `status`, `clean-failed`) for the control plane | [main.go](../cmd/factory/main.go) |
 | **`internal/controlplane`** | Temporal worker startup (`MaxConcurrentActivityExecutionSize: 1`), single-issue FIFO scheduler, signal bridge, shared GitHub/doctor/status probes | [runner.go](../internal/controlplane/runner.go), [doctor.go](../internal/controlplane/doctor.go), [status.go](../internal/controlplane/status.go), [github.go](../internal/controlplane/github.go) |
 | **`internal/githubapp`** | Stdlib RS256 App JWT signer, 1-hour token cache, Issue Form markdown parser, `IssueController` (PR creation + Checks API wait + squash merge + branch cleanup) | [auth.go](../internal/githubapp/auth.go), [parser.go](../internal/githubapp/parser.go), [client.go](../internal/githubapp/client.go) |
-| **`internal/workflow` & `internal/activities`** | Deterministic `IssueFactoryWorkflow` (`workflowcheck` verified) and 15-second background heartbeat wrapper (`startHeartbeatLoop`) keeping long LLM calls alive cleanly | [issue_workflow.go](../internal/workflow/issue_workflow.go), [activities.go](../internal/activities/activities.go) |
-| **`internal/agents/{pm,dev,tester,reviewer,llm}`** | Typed Go agent baseline (`FACTORY_AGENT_RUNTIME=go`), `os.OpenRoot` sandbox, context compaction, and anti-prompt-leak checks | [pm.go](../internal/agents/pm/pm.go), [tools.go](../internal/agents/dev/tools.go), [agent.go](../internal/agents/tester/agent.go), [agent.go](../internal/agents/reviewer/agent.go) |
-| **`agents_py/`** | Default PydanticAI + MCP Python Temporal Activity Worker (`FACTORY_AGENT_RUNTIME=pydanticai`, queue `ai-factory-agents`) | [agents.py](../agents_py/src/agents_py/agents.py), [mcp_tools.py](../agents_py/src/agents_py/mcp_tools.py), [security.py](../agents_py/src/agents_py/security.py), [worker.py](../agents_py/src/agents_py/worker.py) |
-| **`internal/gitworktree` & `internal/evaluator`** | Isolated `factory/issue-<N>` worktrees, ephemeral `GIT_ASKPASS` pushes, failed snapshot archival (max 5 kept), Playwright JSON parser & URL scanner | [manager.go](../internal/gitworktree/manager.go), [evaluator.go](../internal/evaluator/evaluator.go) |
+| **`internal/workflow` & `internal/activities`** | Deterministic `IssueFactoryWorkflow` (`workflowcheck` verified), named cross-language agent activities, GitHub/worktree/PR control activities | [issue_workflow.go](../internal/workflow/issue_workflow.go), [activities.go](../internal/activities/activities.go) |
+| **`agents_py/`** | PydanticAI Temporal Activity Worker on `ai-factory-agents`, direct PydanticAI tools, `SiteSandbox`, secret-scrubbed Playwright, fail-closed QA | [agents.py](../agents_py/src/agents_py/agents.py), [workspace.py](../agents_py/src/agents_py/workspace.py), [security.py](../agents_py/src/agents_py/security.py), [worker.py](../agents_py/src/agents_py/worker.py) |
+| **`internal/gitworktree`** | Isolated `factory/issue-<N>` worktrees, diff isolation, ephemeral `GIT_ASKPASS` pushes, and failed snapshot archival (max 5 kept) | [manager.go](../internal/gitworktree/manager.go) |
 
 ## Design, Observability & Kubernetes Readiness
 
 - **[Observability, Configurability & Agent Evals](observability-and-evals.md)** — Prometheus `/metrics`, `/healthz`, `/readyz`, structured `slog` JSON logs, `LiteLLM_SpendLogs` KPIs, and tunable `FACTORY_*` timeout/retry variables.
+- **Tracing** — Cross-language OpenTelemetry/OpenInference propagation to Phoenix is not implemented; trace IDs are not currently attached to PRs.
 - **[Running in Kubernetes / Migrating to AKS](deployment-k8s-aks.md)** — How the stateless Go worker, `/readyz` probes, and `FACTORY_MAX_CONCURRENT_ACTIVITIES` transition cleanly from local macOS host execution to AKS Pods.
-- **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0007`.
+- **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0009`.
