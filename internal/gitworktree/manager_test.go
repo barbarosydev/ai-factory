@@ -44,6 +44,31 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+func TestCleanGitEnvKeepsOnlyRequiredEnvironment(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("HOME", "/tmp/home")
+	t.Setenv("LITELLM_DEV_KEY", "model-secret")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_BASE64", "github-secret")
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+	t.Setenv("GIT_CONFIG_VALUE_0", "all")
+	t.Setenv("GIT_CONFIG_KEY_1", "credential.helper")
+	t.Setenv("GIT_CONFIG_VALUE_1", "leak-secret")
+
+	env := cleanGitEnv("AI_FACTORY_GIT_TOKEN=short-lived")
+	joined := strings.Join(env, "\n")
+	for _, forbidden := range []string{"model-secret", "github-secret", "leak-secret", "credential.helper"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("clean Git environment contains forbidden value %q", forbidden)
+		}
+	}
+	for _, required := range []string{"PATH=/usr/bin", "HOME=/tmp/home", "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.bareRepository", "GIT_CONFIG_VALUE_0=all", "AI_FACTORY_GIT_TOKEN=short-lived"} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("clean Git environment is missing %q", required)
+		}
+	}
+}
+
 func TestWorktreeLifecycleCommitPushAndFailedArchive(t *testing.T) {
 	t.Parallel()
 

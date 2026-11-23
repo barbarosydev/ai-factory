@@ -10,14 +10,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/barbarosydev/ai-factory/internal/agents/reviewer"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
 )
 
 const maxFailedSnapshots = 5
+
+// DiffAudit summarizes changed paths and diff stats inside the worktree.
+type DiffAudit struct {
+	ChangedFiles    []string `json:"changed_files"`
+	PathIsolationOK bool     `json:"path_isolation_ok"`
+	DiffStat        string   `json:"diff_stat"`
+}
 
 // TokenProvider supplies a short-lived GitHub App installation token for git push/fetch.
 type TokenProvider func(ctx context.Context) (string, error)
@@ -130,13 +137,13 @@ func (m *Manager) PrepareWorktree(ctx context.Context, issueNumber int, slug str
 }
 
 // InspectGitDiff verifies that only files under sites/<slug>/ have changed in worktreeDir.
-func (m *Manager) InspectGitDiff(ctx context.Context, worktreeDir, slug string) (reviewer.DiffAudit, error) {
+func (m *Manager) InspectGitDiff(ctx context.Context, worktreeDir, slug string) (DiffAudit, error) {
 	if err := contracts.ValidateSiteSlug(slug); err != nil {
-		return reviewer.DiffAudit{}, err
+		return DiffAudit{}, err
 	}
 	statusOut, err := m.gitOutput(ctx, worktreeDir, "status", "--porcelain", "-uall")
 	if err != nil {
-		return reviewer.DiffAudit{}, fmt.Errorf("git status: %w", err)
+		return DiffAudit{}, fmt.Errorf("git status: %w", err)
 	}
 
 	expectedPrefix := fmt.Sprintf("sites/%s/", slug)
@@ -160,7 +167,7 @@ func (m *Manager) InspectGitDiff(ctx context.Context, worktreeDir, slug string) 
 	sort.Strings(changed)
 
 	diffStat, _ := m.gitOutput(ctx, worktreeDir, "diff", "--stat")
-	return reviewer.DiffAudit{
+	return DiffAudit{
 		ChangedFiles:    changed,
 		PathIsolationOK: pathOK && len(changed) > 0,
 		DiffStat:        strings.TrimSpace(diffStat),
@@ -370,18 +377,40 @@ func (m *Manager) gitRun(ctx context.Context, dir string, args ...string) error 
 }
 
 func cleanGitEnv(extra ...string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "GIT_DIR=") ||
-			strings.HasPrefix(e, "GIT_WORK_TREE=") ||
-			strings.HasPrefix(e, "GIT_INDEX_FILE=") ||
-			strings.HasPrefix(e, "GIT_OBJECT_DIRECTORY=") ||
-			strings.HasPrefix(e, "GIT_ALTERNATE_OBJECT_DIRECTORIES=") ||
-			strings.HasPrefix(e, "GIT_COMMON_DIR=") {
-			continue
+	source := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			source[key] = value
 		}
-		env = append(env, e)
 	}
+
+	var env []string
+	for _, key := range []string{"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SYSTEMROOT"} {
+		if value, ok := source[key]; ok {
+			env = append(env, key+"="+value)
+		}
+	}
+
+	if count, err := strconv.Atoi(source["GIT_CONFIG_COUNT"]); err == nil && count > 0 && count <= 100 {
+		configCount := 0
+		for i := 0; i < count; i++ {
+			index := strconv.Itoa(i)
+			key := source["GIT_CONFIG_KEY_"+index]
+			value := source["GIT_CONFIG_VALUE_"+index]
+			if strings.EqualFold(key, "safe.bareRepository") && strings.EqualFold(value, "all") {
+				env = append(env,
+					"GIT_CONFIG_KEY_"+strconv.Itoa(configCount)+"="+key,
+					"GIT_CONFIG_VALUE_"+strconv.Itoa(configCount)+"="+value,
+				)
+				configCount++
+			}
+		}
+		if configCount > 0 {
+			env = append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(configCount))
+		}
+	}
+
 	return append(env, extra...)
 }
 

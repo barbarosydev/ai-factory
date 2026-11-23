@@ -7,4 +7,5 @@
 - [0005. Bounded self-correction and retry separation](0005-bounded-self-correction-and-retry-separation.md)
 - [0006. Agent harness](0006-agent-harness.md)
 - [0007. Gemma 4 structured JSON reliability, background heartbeats, and high-velocity skills](0007-gemma4-structured-json-and-high-velocity-skills.md)
-- [0008. Polyglot PydanticAI + MCP agent runtime and retiring prompt-leaky scaffolding](0008-polyglot-pydanticai-and-mcp-agent-runtime.md)
+- [0008. PydanticAI worker and retiring prompt-leaky scaffolding](0008-polyglot-pydanticai-and-mcp-agent-runtime.md)
+- [0009. Single PydanticAI agent runtime and direct tools](0009-single-pydanticai-agent-runtime.md)

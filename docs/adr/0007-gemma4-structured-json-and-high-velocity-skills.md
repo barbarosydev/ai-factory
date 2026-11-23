@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (amended by [ADR 0008](0008-polyglot-pydanticai-and-mcp-agent-runtime.md))
+Accepted (agent runtime details amended by [ADR 0008](0008-polyglot-pydanticai-and-mcp-agent-runtime.md) and [ADR 0009](0009-single-pydanticai-agent-runtime.md))
 
 ## Date
 
@@ -18,10 +18,10 @@ Live end-to-end testing against Ollama (`gemma4:12b` and `gemma4:e4b`) and Tempo
 
 ## Decision
 
-1. **Example-Guided JSON + Deterministic Normalization (`internal/agents/pm/pm.go`)**: Drop strict GBNF `response_format` on `pm-agent`, use `temperature: 0.2`, embed the canonical JSON contract in `prompts/pm_system.md`, extract JSON from `content` or `reasoning_content` fallback, and normalize slugs/headings/colors deterministically before `PMDecisionOutput.Validate()`.
-2. **Background 15s Activity Heartbeats (`internal/activities/activities.go`) & SDK Concurrency (`internal/controlplane/runner.go`)**: Run a 15-second background ticker (`startHeartbeatLoop`) around every long-running agent activity, set generous `StartToCloseTimeout` (`30m–60m`) and `HeartbeatTimeout` (`10m–15m`), and enforce single-task model execution strictly via `MaxConcurrentActivityExecutionSize: 1` (leaving workflow task concurrency at the SDK default).
-3. **High-Velocity Sandboxed Skills (`internal/agents/dev/scaffold.go`, `tester/agent.go`, `reviewer/agent.go`)**:
-   - Give the Developer Agent `scaffold_site_from_spec` (generating accessible semantic HTML5 + responsive CSS3 + vanilla JS inside `os.OpenRoot`) and `write_site_bundle`, completing most builds in 1 turn (~5s at ~180 tok/s on `gemma4:e4b`).
+1. **Example-Guided JSON + Deterministic Normalization**: Drop strict GBNF `response_format` on `pm-agent`, use `temperature: 0.2`, keep the canonical contract in `prompts/pm_system.md`, and normalize PM output before contract validation.
+2. **Activity Heartbeats & Go SDK Concurrency**: Python agent activities emit periodic heartbeats; the Go control worker keeps `MaxConcurrentActivityExecutionSize: 1` (leaving workflow task concurrency at the SDK default).
+3. **High-Velocity Sandboxed Skills**:
+   - Give the Developer Agent a `write_site_bundle` tool within Python `SiteSandbox`, completing most builds in one turn.
    - Bundle `dom_snapshot` directly inside `run_playwright_suite` tool output (~8–10s end-to-end verification).
    - Pre-supply git diff and URL scan facts to `sec-agent` (~4s review).
    - Pass `--no-verify` on automated bot commits inside isolated worktrees (`internal/gitworktree/manager.go`) because the worktree has already been validated by Tester + Reviewer and lacks a duplicate `node_modules/` tree.

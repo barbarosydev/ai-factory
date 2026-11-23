@@ -18,7 +18,12 @@ run() {
   fi
 }
 
-tracked() { git ls-files --cached --others --exclude-standard -- "$@"; }
+tracked() {
+  local path
+  while IFS= read -r path; do
+    [[ -e "$REPO_ROOT/$path" ]] && printf '%s\n' "$path"
+  done < <(git ls-files --cached --others --exclude-standard -- "$@")
+}
 
 require_cmd go golangci-lint shellcheck ruff jq yq conftest actionlint
 

@@ -1,6 +1,6 @@
-# `agents_py` — PydanticAI + MCP Temporal Activity Worker
+# `agents_py` — PydanticAI Temporal Activity Worker
 
-Python Temporal Activity Worker for `ai-factory` executing `RunPMAgentActivity`, `RunDeveloperAgentActivity`, `RunTesterAgentActivity`, and `RunReviewerActivity` on the `ai-factory-agents` task queue when `FACTORY_AGENT_RUNTIME=pydanticai`.
+Python Temporal Activity Worker for `ai-factory`, executing PM, Developer, Tester, and Reviewer activities on the `ai-factory-agents` task queue. Each role uses direct PydanticAI tools; no MCP server is part of the runtime.
 
 ## Quickstart
 

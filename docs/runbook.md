@@ -11,8 +11,8 @@
 | `task run:once` | Process a single issue and exit (`task run:once -- --issue 42`) |
 | `task status` | Show Temporal workflow state, loaded Ollama models, and open `factory:*` issues |
 | `task clean:failed` | Remove archived `.worktrees/issue-*-failed-*` folders |
-| `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, policies, `actionlint`, doc checks |
-| `task test` | Go unit, Temporal workflow replay, sandbox escape, and worktree tests |
+| `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, `mypy`, policies, `actionlint`, doc checks |
+| `task test` | Go unit, Temporal workflow replay, Python agent, sandbox escape, and worktree tests |
 | `task ci` | Run `task lint`, `task test`, and `gitleaks` |
 
 ## Daily Startup
@@ -55,7 +55,8 @@ When the PM Agent detects missing facts or contradictory requirements:
 
 When running `task run:auto -- --skip-remote-ci`, the factory skips polling GitHub Checks API and squash-merges immediately after local Playwright + Reviewer approval. Use `--skip-remote-ci` only when remote GitHub Actions runners are unavailable or intentionally bypassed.
 
-## Agent Runtime Toggle (`pydanticai` vs `go`)
+## Agent Worker
 
-- By default (`FACTORY_AGENT_RUNTIME=pydanticai`), `task run` / `task run:once` starts both the Go control-plane worker and the Python `agents_py` PydanticAI + MCP activity worker on `FACTORY_AGENT_TASK_QUEUE=ai-factory-agents` (see [ADR 0008](adr/0008-polyglot-pydanticai-and-mcp-agent-runtime.md)).
-- To fall back to the legacy Go-native LLM activities without changing workflows, run with `FACTORY_AGENT_RUNTIME=go task run` (or `FACTORY_AGENT_RUNTIME=go task run:once -- --issue 42`).
+`task run` and `task run:once` start the Go control-plane worker and the PydanticAI Python activity worker on `FACTORY_AGENT_TASK_QUEUE` (default `ai-factory-agents`). There is no Go agent runtime or MCP server; the agents use direct PydanticAI tools. See [ADR 0009](adr/0009-single-pydanticai-agent-runtime.md).
+
+Before upgrading from a version that routed agent activities to the control-plane queue, use `task status` to confirm no workflows are still running. Such older executions may have an empty `AgentTaskQueue` in their persisted input and cannot be serviced by the Python worker after the Go agent activities are removed.

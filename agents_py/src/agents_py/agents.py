@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -37,14 +38,14 @@ from agents_py.contracts import (
     TestReport,
     TestRunInput,
 )
-from agents_py.mcp_tools import (
+from agents_py.security import inspect_dom_snapshot, scan_external_urls, wrap_untrusted_input
+from agents_py.workspace import (
     WorkspaceDeps,
     create_site_structure_result_dict,
     inspect_git_diff,
     read_template_files,
     run_playwright_suite,
 )
-from agents_py.security import inspect_dom_snapshot, scan_external_urls, wrap_untrusted_input
 
 PROMPTS_DIR = pathlib.Path(__file__).resolve().parents[3] / "prompts"
 SLUG_CLEAN_RE = re.compile(r"[^a-z0-9-]+")
@@ -60,7 +61,6 @@ class FactoryModelConfig:
     test_key: str
     sec_key: str
     websites_repo_path: str
-    num_ctx: int = 32768
 
 
 def _load_prompt(filename: str) -> str:
@@ -267,7 +267,6 @@ async def run_pm_agent(
     issue: CustomerIssueInput,
     websites_repo_path: str,
     model: Model,
-    num_ctx: int = 32768,
 ) -> PMDecisionOutput:
     """Analyze a CustomerIssueInput using PydanticAI structured output."""
     sites_dir = pathlib.Path(websites_repo_path) / "sites"
@@ -288,6 +287,7 @@ async def run_pm_agent(
         system_prompt=_load_prompt("pm_system.md"),
         retries=2,
         model_settings=ModelSettings(temperature=0.2, max_tokens=8192),
+        capabilities=[ProcessHistory(compact_tool_history)],
     )
 
     user_prompt = (
@@ -379,7 +379,7 @@ async def run_developer_agent(
     websites_repo_path: str,
     model: Model,
 ) -> ImplementationResult:
-    """Execute the PydanticAI Developer Agent with MCP-aligned sandboxed site tools."""
+    """Execute the PydanticAI Developer Agent with sandboxed site tools."""
     deps = WorkspaceDeps(
         worktree_dir=worktree_dir,
         websites_repo_path=websites_repo_path,
@@ -391,6 +391,7 @@ async def run_developer_agent(
         deps_type=WorkspaceDeps,
         system_prompt=_load_prompt("dev_system.md"),
         model_settings=ModelSettings(temperature=0.1, max_tokens=8192),
+        capabilities=[ProcessHistory(compact_tool_history)],
     )
     _register_developer_tools(dev_agent)
 
@@ -407,7 +408,8 @@ async def run_developer_agent(
     user_prompt = (
         "Implement or update the website for this DeveloperTaskInput using `write_site_bundle` "
         "or `read_file`/`write_file` (author authentic domain copy; never copy `section.purpose` verbatim into HTML):\n\n"
-        f"```json\n{task.model_dump_json(indent=2)}\n```{existing_context}"
+        f"{wrap_untrusted_input('developer_task', task.model_dump_json(indent=2))}"
+        f"{existing_context}"
     )
     res = await dev_agent.run(user_prompt, deps=deps)
     files = sorted(deps.changed_files) or deps.sandbox().list_files()
@@ -512,11 +514,13 @@ async def run_tester_agent(
         deps_type=_TesterDeps,
         system_prompt=_load_prompt("tester_system.md"),
         model_settings=ModelSettings(temperature=0.0, max_tokens=8192),
+        capabilities=[ProcessHistory(compact_tool_history)],
     )
     _register_tester_tools(tester_agent, playwright_runner)
 
     await tester_agent.run(
-        f"Verify the website for TestRunInput:\n\n```json\n{test_input.model_dump_json(indent=2)}\n```",
+        "Verify the website for TestRunInput:\n\n"
+        + wrap_untrusted_input("test_input", test_input.model_dump_json(indent=2)),
         deps=deps,
     )
 
@@ -671,6 +675,7 @@ async def run_reviewer_agent(
         deps_type=_ReviewerDeps,
         system_prompt=_load_prompt("reviewer_system.md"),
         model_settings=ModelSettings(temperature=0.0, max_tokens=8192),
+        capabilities=[ProcessHistory(compact_tool_history)],
     )
     _register_reviewer_tools(reviewer_agent)
 
@@ -693,6 +698,7 @@ async def run_reviewer_agent(
 
     return ReviewResult(
         approved=deps.submitted.approved
+        and deps.submitted.spec_fidelity_ok
         and bool(diff_audit["path_isolation_ok"])
         and len(external_urls) == 0,
         path_isolation_ok=bool(diff_audit["path_isolation_ok"]),

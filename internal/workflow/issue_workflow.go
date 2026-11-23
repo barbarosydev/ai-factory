@@ -176,7 +176,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 
 	for round := 0; round <= policy.MaxClarificationRounds; round++ {
 		status.Stage = "pm_analysis"
-		if err := workflow.ExecuteActivity(pmCtx, acts.RunPMAgentActivity, issue).Get(ctx, &pmOut); err != nil {
+		if err := workflow.ExecuteActivity(pmCtx, "RunPMAgentActivity", issue).Get(ctx, &pmOut); err != nil {
 			_ = markFailed(ghCtx, acts, in.Issue.IssueNumber, "PM Agent failed: "+err.Error())
 			return WorkflowResult{IssueNumber: in.Issue.IssueNumber, FinalState: "failed", Reason: err.Error()}, err
 		}
@@ -324,7 +324,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		status.Attempt = attempt
 		status.Stage = "dev_attempt_" + strconv.Itoa(attempt)
 
-		if err := workflow.ExecuteActivity(devCtx, acts.RunDeveloperAgentActivity, activities.DeveloperActivityInput{
+		if err := workflow.ExecuteActivity(devCtx, "RunDeveloperAgentActivity", activities.DeveloperActivityInput{
 			WorktreeDir: worktreeDir,
 			Task: contracts.DeveloperTaskInput{
 				IssueNumber:   in.Issue.IssueNumber,
@@ -343,7 +343,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		}
 
 		status.Stage = "test_attempt_" + strconv.Itoa(attempt)
-		if err := workflow.ExecuteActivity(testCtx, acts.RunTesterAgentActivity, activities.TesterActivityInput{
+		if err := workflow.ExecuteActivity(testCtx, "RunTesterAgentActivity", activities.TesterActivityInput{
 			WorktreeDir: worktreeDir,
 			Input: contracts.TestRunInput{
 				IssueNumber: in.Issue.IssueNumber,
@@ -367,7 +367,7 @@ func IssueFactoryWorkflow(ctx workflow.Context, in WorkflowInput) (WorkflowResul
 		}
 
 		status.Stage = "reviewing"
-		if err := workflow.ExecuteActivity(revCtx, acts.RunReviewerActivity, activities.ReviewerActivityInput{
+		if err := workflow.ExecuteActivity(revCtx, "RunReviewerActivity", activities.ReviewerActivityInput{
 			WorktreeDir: worktreeDir,
 			Input: contracts.ReviewInput{
 				Issue:        issue,

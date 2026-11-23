@@ -14,8 +14,9 @@ import (
 type AutonomyMode string
 
 const (
-	AutonomyReview AutonomyMode = "review"
-	AutonomyAuto   AutonomyMode = "auto"
+	AutonomyReview            AutonomyMode = "review"
+	AutonomyAuto              AutonomyMode = "auto"
+	maxSemanticRepairAttempts              = 3
 )
 
 // WorkflowPolicy configures bounded repair loops, human-in-the-loop wait timeouts,
@@ -24,7 +25,6 @@ type WorkflowPolicy struct {
 	MaxRepairAttempts      int           `json:"max_repair_attempts"`
 	MaxClarificationRounds int           `json:"max_clarification_rounds"`
 	HumanWaitTimeout       time.Duration `json:"human_wait_timeout"`
-	HeartbeatInterval      time.Duration `json:"heartbeat_interval"`
 	HeartbeatTimeout       time.Duration `json:"heartbeat_timeout"`
 	GitHubTimeout          time.Duration `json:"github_timeout"`
 	PMTimeout              time.Duration `json:"pm_timeout"`
@@ -39,10 +39,9 @@ type WorkflowPolicy struct {
 // DefaultWorkflowPolicy returns the default Temporal execution policy tuned for local Apple Silicon inference.
 func DefaultWorkflowPolicy() WorkflowPolicy {
 	return WorkflowPolicy{
-		MaxRepairAttempts:      3,
+		MaxRepairAttempts:      maxSemanticRepairAttempts,
 		MaxClarificationRounds: 2,
 		HumanWaitTimeout:       7 * 24 * time.Hour,
-		HeartbeatInterval:      15 * time.Second,
 		HeartbeatTimeout:       15 * time.Minute,
 		GitHubTimeout:          5 * time.Minute,
 		PMTimeout:              45 * time.Minute,
@@ -67,9 +66,6 @@ func (p WorkflowPolicy) WithDefaults() WorkflowPolicy {
 	}
 	if p.HumanWaitTimeout <= 0 {
 		p.HumanWaitTimeout = def.HumanWaitTimeout
-	}
-	if p.HeartbeatInterval <= 0 {
-		p.HeartbeatInterval = def.HeartbeatInterval
 	}
 	if p.HeartbeatTimeout <= 0 {
 		p.HeartbeatTimeout = def.HeartbeatTimeout
@@ -109,7 +105,6 @@ type Config struct {
 	TemporalAddress         string
 	TemporalNamespace       string
 	TaskQueue               string
-	AgentRuntime            string
 	AgentTaskQueue          string
 	LiteLLMBaseURL          string
 	WebsitesRepoPath        string
@@ -121,7 +116,6 @@ type Config struct {
 	AutonomyMode            AutonomyMode
 	SkipRemoteCI            bool
 	PollIntervalSeconds     int
-	NumCtx                  int
 	MaxConcurrentActivities int
 	MetricsAddr             string
 	LogFormat               string
@@ -140,7 +134,6 @@ func LoadFromEnv() (Config, error) {
 		TemporalAddress:         envOr("FACTORY_TEMPORAL_ADDRESS", "temporal.localhost:7233"),
 		TemporalNamespace:       envOr("FACTORY_TEMPORAL_NAMESPACE", "default"),
 		TaskQueue:               envOr("FACTORY_TASK_QUEUE", "ai-factory-v1"),
-		AgentRuntime:            strings.ToLower(envOr("FACTORY_AGENT_RUNTIME", "pydanticai")),
 		AgentTaskQueue:          envOr("FACTORY_AGENT_TASK_QUEUE", "ai-factory-agents"),
 		LiteLLMBaseURL:          strings.TrimRight(envOr("FACTORY_LITELLM_URL", "http://litellm.localhost:8080/v1"), "/"),
 		WebsitesRepoPath:        envOr("FACTORY_WEBSITES_REPO", "../ai-factory-websites"),
@@ -150,7 +143,6 @@ func LoadFromEnv() (Config, error) {
 		AutonomyMode:            AutonomyMode(envOr("FACTORY_AUTONOMY_MODE", string(AutonomyReview))),
 		SkipRemoteCI:            os.Getenv("FACTORY_SKIP_REMOTE_CI") == "1" || strings.EqualFold(os.Getenv("FACTORY_SKIP_REMOTE_CI"), "true"),
 		PollIntervalSeconds:     envIntOr("FACTORY_POLL_INTERVAL_SECONDS", 15),
-		NumCtx:                  envIntOr("FACTORY_NUM_CTX", 32768),
 		MaxConcurrentActivities: envIntOr("FACTORY_MAX_CONCURRENT_ACTIVITIES", 1),
 		MetricsAddr:             envOr("FACTORY_METRICS_ADDR", "127.0.0.1:9091"),
 		LogFormat:               strings.ToLower(envOr("FACTORY_LOG_FORMAT", "text")),
@@ -166,6 +158,9 @@ func LoadFromEnv() (Config, error) {
 	if cfg.Policy.MaxRepairAttempts, err = envPositiveInt("FACTORY_MAX_REPAIR_ATTEMPTS", defPolicy.MaxRepairAttempts); err != nil {
 		return Config{}, err
 	}
+	if cfg.Policy.MaxRepairAttempts > maxSemanticRepairAttempts {
+		return Config{}, fmt.Errorf("FACTORY_MAX_REPAIR_ATTEMPTS must be at most %d", maxSemanticRepairAttempts)
+	}
 	if cfg.Policy.MaxClarificationRounds, err = envPositiveInt("FACTORY_MAX_CLARIFICATION_ROUNDS", defPolicy.MaxClarificationRounds); err != nil {
 		return Config{}, err
 	}
@@ -176,9 +171,6 @@ func LoadFromEnv() (Config, error) {
 		return Config{}, err
 	}
 	if cfg.Policy.HumanWaitTimeout, err = envDuration("FACTORY_HUMAN_WAIT_TIMEOUT", defPolicy.HumanWaitTimeout); err != nil {
-		return Config{}, err
-	}
-	if cfg.Policy.HeartbeatInterval, err = envDuration("FACTORY_HEARTBEAT_INTERVAL", defPolicy.HeartbeatInterval); err != nil {
 		return Config{}, err
 	}
 	if cfg.Policy.HeartbeatTimeout, err = envDuration("FACTORY_HEARTBEAT_TIMEOUT", defPolicy.HeartbeatTimeout); err != nil {
@@ -235,11 +227,8 @@ func LoadFromEnv() (Config, error) {
 	if cfg.LogFormat != "text" && cfg.LogFormat != "json" {
 		return Config{}, fmt.Errorf("invalid FACTORY_LOG_FORMAT %q: must be text or json", cfg.LogFormat)
 	}
-	if cfg.AgentRuntime != "pydanticai" && cfg.AgentRuntime != "go" {
-		return Config{}, fmt.Errorf("invalid FACTORY_AGENT_RUNTIME %q: must be pydanticai or go", cfg.AgentRuntime)
-	}
-	if cfg.AgentRuntime == "pydanticai" && strings.TrimSpace(cfg.AgentTaskQueue) == "" {
-		return Config{}, errors.New("FACTORY_AGENT_TASK_QUEUE must not be empty when FACTORY_AGENT_RUNTIME=pydanticai")
+	if strings.TrimSpace(cfg.AgentTaskQueue) == "" {
+		return Config{}, errors.New("FACTORY_AGENT_TASK_QUEUE must not be empty")
 	}
 	if len(cfg.AllowedGitHubUsers) == 0 {
 		return Config{}, errors.New("FACTORY_ALLOWED_GITHUB_USERS must contain at least one GitHub username")

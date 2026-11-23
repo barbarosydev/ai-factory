@@ -31,8 +31,6 @@ func TestRegistryProbesAndPrometheusOutput(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	reg.RecordAgentCall("pm", "pm-agent", 500, 1200, 18*time.Second, nil)
-	reg.RecordPlaywrightRun(true, 1450)
 	reg.RecordWorkflow("done", 95*time.Second, 1)
 
 	rec = httptest.NewRecorder()
@@ -41,10 +39,6 @@ func TestRegistryProbesAndPrometheusOutput(t *testing.T) {
 	body := rec.Body.String()
 	require.Contains(t, body, `ai_factory_ready 1`)
 	require.Contains(t, body, `ai_factory_workflows_total{final_state="done"} 1`)
-	require.Contains(t, body, `ai_factory_agent_calls_total{role="pm",model="pm-agent",status="ok"} 1`)
-	require.Contains(t, body, `ai_factory_agent_tokens_total{role="pm",model="pm-agent",kind="prompt"} 500`)
-	require.Contains(t, body, `ai_factory_agent_tokens_total{role="pm",model="pm-agent",kind="completion"} 1200`)
-	require.Contains(t, body, `ai_factory_playwright_runs_total{passed="true"} 1`)
 	require.Contains(t, body, `ai_factory_repair_attempts_total 1`)
 }
 

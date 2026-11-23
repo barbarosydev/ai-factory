@@ -4,18 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.temporal.io/sdk/activity"
 
-	"github.com/barbarosydev/ai-factory/internal/agents/dev"
-	"github.com/barbarosydev/ai-factory/internal/agents/pm"
-	"github.com/barbarosydev/ai-factory/internal/agents/reviewer"
-	"github.com/barbarosydev/ai-factory/internal/agents/tester"
 	"github.com/barbarosydev/ai-factory/internal/config"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
 	"github.com/barbarosydev/ai-factory/internal/gitworktree"
-	"github.com/barbarosydev/ai-factory/internal/telemetry"
 )
 
 // IssueTransition describes a factory label swap and optional comment/close on GitHub.
@@ -122,14 +116,8 @@ type CleanupInput struct {
 // FactoryActivities implements all Temporal activities for IssueFactoryWorkflow.
 // Credentials remain encapsulated inside private client fields and never enter Temporal payloads.
 type FactoryActivities struct {
-	PM                *pm.Agent
-	Dev               *dev.Agent
-	Tester            *tester.Agent
-	Reviewer          *reviewer.Agent
-	Git               *gitworktree.Manager
-	GitHub            IssueController
-	Metrics           *telemetry.Registry
-	HeartbeatInterval time.Duration
+	Git    *gitworktree.Manager
+	GitHub IssueController
 }
 
 // TransitionIssueStateActivity updates factory:* labels and comments on GitHub.
@@ -140,61 +128,12 @@ func (a *FactoryActivities) TransitionIssueStateActivity(ctx context.Context, re
 	return a.GitHub.TransitionIssueState(ctx, req)
 }
 
-// RunPMAgentActivity classifies scope and produces WebsiteSpecification or clarification questions.
-func (a *FactoryActivities) RunPMAgentActivity(ctx context.Context, issue contracts.CustomerIssueInput) (contracts.PMDecisionOutput, error) {
-	if a.PM == nil {
-		return contracts.PMDecisionOutput{}, fmt.Errorf("pm agent not configured")
-	}
-	stopHB := startHeartbeatLoop(ctx, a.HeartbeatInterval, fmt.Sprintf("pm analyze issue #%d", issue.IssueNumber))
-	defer stopHB()
-	return a.PM.AnalyzeIssue(ctx, issue)
-}
-
 // PrepareWorktreeActivity creates a clean isolated git worktree on factory/issue-<N>.
 func (a *FactoryActivities) PrepareWorktreeActivity(ctx context.Context, in PrepareWorktreeInput) (string, error) {
 	if a.Git == nil {
 		return "", fmt.Errorf("git worktree manager not configured")
 	}
 	return a.Git.PrepareWorktree(ctx, in.IssueNumber, in.SiteSlug)
-}
-
-// RunDeveloperAgentActivity runs the bounded Developer tool loop inside the issue worktree.
-func (a *FactoryActivities) RunDeveloperAgentActivity(ctx context.Context, in DeveloperActivityInput) (contracts.ImplementationResult, error) {
-	if a.Dev == nil {
-		return contracts.ImplementationResult{}, fmt.Errorf("developer agent not configured")
-	}
-	stopHB := startHeartbeatLoop(ctx, a.HeartbeatInterval, fmt.Sprintf("dev implement %s (attempt %d)", in.Task.Spec.SiteSlug, in.Task.Attempt))
-	defer stopHB()
-	siteDir := gitworktree.SiteDir(in.WorktreeDir, in.Task.Spec.SiteSlug)
-	return a.Dev.Implement(ctx, in.Task, siteDir, func(detail string) {
-		activity.RecordHeartbeat(ctx, detail)
-	})
-}
-
-// RunTesterAgentActivity executes the independent Tester Agent with Playwright & DOM tools.
-func (a *FactoryActivities) RunTesterAgentActivity(ctx context.Context, in TesterActivityInput) (contracts.TestReport, error) {
-	if a.Tester == nil {
-		return contracts.TestReport{}, fmt.Errorf("tester agent not configured")
-	}
-	stopHB := startHeartbeatLoop(ctx, a.HeartbeatInterval, fmt.Sprintf("tester verify %s (attempt %d)", in.Input.Spec.SiteSlug, in.Input.Attempt))
-	defer stopHB()
-	report, err := a.Tester.Verify(ctx, in.Input, in.WorktreeDir, func(detail string) {
-		activity.RecordHeartbeat(ctx, detail)
-	})
-	if err == nil && a.Metrics != nil {
-		a.Metrics.RecordPlaywrightRun(report.Passed, report.DurationMs)
-	}
-	return report, err
-}
-
-// RunReviewerActivity executes path-isolation, URL scan, and PR composition via sec-agent.
-func (a *FactoryActivities) RunReviewerActivity(ctx context.Context, in ReviewerActivityInput) (contracts.ReviewResult, error) {
-	if a.Reviewer == nil {
-		return contracts.ReviewResult{}, fmt.Errorf("reviewer agent not configured")
-	}
-	stopHB := startHeartbeatLoop(ctx, a.HeartbeatInterval, fmt.Sprintf("reviewing %s", in.Input.Spec.SiteSlug))
-	defer stopHB()
-	return a.Reviewer.Review(ctx, in.Input, in.WorktreeDir)
 }
 
 // PublishPullRequestActivity commits the site + evidence, pushes the branch, and opens a PR.
@@ -237,29 +176,4 @@ func (a *FactoryActivities) CleanupWorktreeActivity(ctx context.Context, in Clea
 		return fmt.Errorf("git worktree manager not configured")
 	}
 	return a.Git.CleanupWorktree(ctx, in.WorktreeDir, in.IssueNumber, in.SiteSlug, in.Failed, in.Reports)
-}
-
-func startHeartbeatLoop(ctx context.Context, interval time.Duration, detail string) func() {
-	if interval <= 0 {
-		interval = 15 * time.Second
-	}
-	activity.RecordHeartbeat(ctx, detail)
-	done := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				activity.RecordHeartbeat(ctx, detail)
-			}
-		}
-	}()
-	return func() {
-		close(done)
-	}
 }
