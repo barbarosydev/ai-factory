@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-Phase 2 introduced a Python PydanticAI Temporal activity worker while retaining a selectable Go implementation of the same four agent roles. The duplicate Go implementations, runtime-selection setting, embedded prompt bundle, and agent-only evaluator duplicated behavior and security logic. The Python agents already use native PydanticAI `@agent.tool` functions; the separate MCP server in `mcp_tools.py` was not connected to those agents.
+Go and Python implementations duplicated the same four agent roles, tooling, prompts, and security logic. PydanticAI provides native `@agent.tool` functions, so the separate MCP server in `mcp_tools.py` was not used by the agents.
 
 ## Decision
 
@@ -26,4 +26,4 @@ Phase 2 introduced a Python PydanticAI Temporal activity worker while retaining 
 - There is one implementation of each agent role and one agent-tooling/security boundary to maintain.
 - Temporal remains polyglot only at the Go control-plane/Python activity-worker boundary; Go agent execution is not a supported fallback.
 - Agent call/token/Playwright metrics formerly emitted by the Go process are not available on its `/metrics` endpoint. LiteLLM spend logs, Temporal histories, and test reports remain available.
-- This decision does not implement Phase 3 OpenTelemetry/Phoenix tracing or PR trace provenance.
+- Cross-language tracing across Temporal, the Python worker, and LiteLLM, including Phoenix trace provenance, is not currently implemented.

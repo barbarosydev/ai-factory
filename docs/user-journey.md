@@ -103,7 +103,7 @@ task doctor   # verifies Websites repo/Playwright, Temporal gRPC, 4 scoped LiteL
 | **Cleanup Snapshots** | `task clean:failed` | Deletes archived `.worktrees/issue-*-failed-*` debugging folders |
 
 ### 4. Inspect Live Telemetry
-- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and Python activity heartbeats. Cross-language OpenTelemetry trace propagation to Phoenix (Phase 3) is not implemented.
+- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and Python activity heartbeats. The system does not currently propagate OpenTelemetry traces to Phoenix.
 - **LiteLLM Admin UI**: `http://litellm.localhost:8080/ui` — filter per-issue & per-agent completions via `X-Litellm-Tag` (`issue-<N>`, `role-pm`, `role-dev`, `role-test`, `role-sec`).
 
 ---

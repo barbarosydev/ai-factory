@@ -70,6 +70,6 @@ stateDiagram-v2
 ## Design, Observability & Kubernetes Readiness
 
 - **[Observability, Configurability & Agent Evals](observability-and-evals.md)** — Prometheus `/metrics`, `/healthz`, `/readyz`, structured `slog` JSON logs, `LiteLLM_SpendLogs` KPIs, and tunable `FACTORY_*` timeout/retry variables.
-- **Phase 3 status** — Cross-language OpenTelemetry/OpenInference tracing to Phoenix and trace provenance remain planned; no trace ID is currently propagated or attached to PRs.
+- **Tracing** — Cross-language OpenTelemetry/OpenInference propagation to Phoenix is not implemented; trace IDs are not currently attached to PRs.
 - **[Running in Kubernetes / Migrating to AKS](deployment-k8s-aks.md)** — How the stateless Go worker, `/readyz` probes, and `FACTORY_MAX_CONCURRENT_ACTIVITIES` transition cleanly from local macOS host execution to AKS Pods.
 - **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0009`.

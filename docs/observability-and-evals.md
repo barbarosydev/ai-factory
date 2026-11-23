@@ -67,4 +67,4 @@ Repair caps, wait timeouts, activity timeouts, and worker concurrency are config
 | `FACTORY_ALLOWED_GITHUB_USERS` | `barbarosydev` | Comma-separated GitHub usernames permitted to trigger issues or send clarification replies |
 | `FACTORY_AGENT_TASK_QUEUE` | `ai-factory-agents` | Temporal task queue for Python PydanticAI activities |
 
-End-to-end OpenTelemetry propagation across Temporal Go, the Python worker, and LiteLLM, plus Phoenix trace provenance, is Phase 3 work and is not implemented yet.
+OpenTelemetry traces are not currently propagated across Temporal, the Python worker, and LiteLLM. Phoenix trace provenance is also unavailable, and PRs do not include trace IDs.

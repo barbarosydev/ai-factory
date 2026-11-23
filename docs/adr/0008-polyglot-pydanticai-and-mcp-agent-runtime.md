@@ -10,7 +10,7 @@ Accepted, superseded for runtime topology by [ADR 0009](0009-single-pydanticai-a
 
 ## Context
 
-Live inspection of generated websites (`kaffeekultur-berlin`, `konditorei-flora-berlin`) revealed that `scaffold_site_from_spec` ([ADR 0007](0007-gemma4-structured-json-and-high-velocity-skills.md)) bypassed real HTML/CSS authoring by rendering a fixed Go template that copied `WebsiteSpecification.sections[].purpose` instructions verbatim into visible `<p>` tags and duplicated `required_keywords` as stub cards. Phase 2 moved agent execution to a Python Temporal worker using PydanticAI. Its agents use direct `@agent.tool` functions.
+Live inspection of generated websites (`kaffeekultur-berlin`, `konditorei-flora-berlin`) revealed that `scaffold_site_from_spec` ([ADR 0007](0007-gemma4-structured-json-and-high-velocity-skills.md)) bypassed real HTML/CSS authoring by rendering a fixed Go template that copied `WebsiteSpecification.sections[].purpose` instructions verbatim into visible `<p>` tags and duplicated `required_keywords` as stub cards. The Python Temporal worker uses PydanticAI with direct `@agent.tool` functions.
 
 ## Decision
 
