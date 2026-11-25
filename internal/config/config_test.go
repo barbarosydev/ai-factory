@@ -30,6 +30,11 @@ func TestLoadFromEnvDefaultsAndOverrides(t *testing.T) {
 	require.Equal(t, "json", cfg.LogFormat)
 	require.Equal(t, ":9091", cfg.MetricsAddr)
 	require.Equal(t, 2, cfg.MaxConcurrentActivities)
+	require.False(t, cfg.OTelDisabled)
+	require.Equal(t, "http://phoenix.localhost:8080", cfg.OTelEndpoint)
+	require.Equal(t, "ai-factory", cfg.OTelProjectName)
+	require.False(t, cfg.OTelCaptureContent)
+	require.Equal(t, "http://phoenix.localhost:8080", cfg.PhoenixUIURL)
 }
 
 func TestLoadFromEnvRejectsInvalidPolicyValues(t *testing.T) {
@@ -54,6 +59,12 @@ func TestLoadFromEnvRejectsInvalidPolicyValues(t *testing.T) {
 	_, err = LoadFromEnv()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "FACTORY_LOG_FORMAT")
+
+	t.Setenv("FACTORY_LOG_FORMAT", "text")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "phoenix.localhost:8080")
+	_, err = LoadFromEnv()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "OTEL_EXPORTER_OTLP_ENDPOINT")
 }
 
 func TestValidateRuntimeSecrets(t *testing.T) {

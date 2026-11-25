@@ -82,15 +82,15 @@ Both templates automatically apply `factory:ready` (only issues carrying `factor
 ### 1. Boot the Local Infrastructure (`ai-factory-infra`)
 ```bash
 cd ../ai-factory-infra
-task up       # starts Ollama + k3d cluster + CNPG Postgres + LiteLLM + Temporal
-task doctor   # verifies 70+ cluster, route, database, and secret isolation checks
+task up       # starts Ollama + k3d cluster + CNPG Postgres + LiteLLM + Temporal + Arize Phoenix
+task doctor   # verifies cluster, Postgres, Ollama, LiteLLM, Temporal, Arize Phoenix, and state secret checks
 ```
 
 ### 2. Verify Factory Readiness & Credentials (`ai-factory`)
 ```bash
 cd ../ai-factory
 task build
-task doctor   # verifies Websites repo/Playwright, Temporal gRPC, 4 scoped LiteLLM keys, Ollama models, & GitHub App token
+task doctor   # verifies Websites repo/Playwright, Temporal gRPC, 4 scoped LiteLLM keys, Ollama models, Phoenix OTLP readiness, & GitHub App token
 ```
 
 ### 3. Run the Factory
@@ -103,8 +103,9 @@ task doctor   # verifies Websites repo/Playwright, Temporal gRPC, 4 scoped LiteL
 | **Cleanup Snapshots** | `task clean:failed` | Deletes archived `.worktrees/issue-*-failed-*` debugging folders |
 
 ### 4. Inspect Live Telemetry
-- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and Python activity heartbeats. The system does not currently propagate OpenTelemetry traces to Phoenix.
-- **LiteLLM Admin UI**: `http://litellm.localhost:8080/ui` — filter per-issue & per-agent completions via `X-Litellm-Tag` (`issue-<N>`, `role-pm`, `role-dev`, `role-test`, `role-sec`).
+- **Arize Phoenix UI**: `http://phoenix.localhost:8080` — inspect the single end-to-end trace waterfall (`ai-factory` project) spanning Go `IssueFactoryWorkflow`, Python PydanticAI agent/model/tool calls, and `playwright.verify_site`, using the `Trace ID` recorded in the Pull Request body (metadata-only by default; set `FACTORY_OTEL_CAPTURE_CONTENT=true` for local prompt/completion capture).
+- **Temporal Web UI**: `http://temporal.localhost:8080` — inspect workflow event histories, timers, signal arrivals (`human-reply`), and Python activity heartbeats.
+- **LiteLLM Admin UI**: `http://litellm.localhost:8080/ui/usage/` and `http://litellm.localhost:8080/ui/logs/` — inspect token spend, virtual-key budget bars, and filter per-issue/per-role calls via `x-litellm-tags` (`issue-<N>`, `role:<agent>`, `attempt-<A>`, `site:<slug>`) and `x-litellm-trace-id`.
 
 ---
 

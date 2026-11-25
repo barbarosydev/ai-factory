@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from opentelemetry import trace
+
 from agents_py.contracts import FailureEvidence, SingleCheck, WebsiteSpecification
 from agents_py.security import (
     SiteSandbox,
@@ -130,64 +132,76 @@ def parse_playwright_json(raw: str, elapsed_ms: int, desktop_png: str, mobile_pn
 
 async def run_playwright_suite(deps: WorkspaceDeps) -> dict[str, Any]:
     """Write spec.json into the worktree and run Playwright with clean_exec_env()."""
-    site_dir = site_dir_for_worktree(deps.worktree_dir, deps.spec.site_slug)
-    site_dir.mkdir(parents=True, exist_ok=True)
-    spec_path = site_dir / "spec.json"
-    spec_path.write_text(deps.spec.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    tracer = trace.get_tracer("ai-factory.workspace")
+    with tracer.start_as_current_span(
+        "playwright.verify_site",
+        attributes={
+            "site.slug": deps.spec.site_slug,
+            "openinference.span.kind": "EVALUATOR",
+        },
+    ) as span:
+        site_dir = site_dir_for_worktree(deps.worktree_dir, deps.spec.site_slug)
+        site_dir.mkdir(parents=True, exist_ok=True)
+        spec_path = site_dir / "spec.json"
+        spec_path.write_text(deps.spec.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
-    port = _free_loopback_port()
-    env = clean_exec_env(
-        {
-            "SITE_SLUG": deps.spec.site_slug,
-            "SITE_WORKTREE_ROOT": deps.worktree_dir,
-            "SITE_SERVER_PORT": str(port),
-            "PW_REPORTER": "json",
-            "WRITE_EVIDENCE": "1",
-            "STRICT_COPY": "1",
-        }
-    )
-
-    start = time.monotonic()
-    proc = await asyncio.create_subprocess_exec(
-        "npx",
-        "playwright",
-        "test",
-        "--reporter=json",
-        cwd=deps.websites_repo_path,
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_b, stderr_b = await proc.communicate()
-    elapsed_ms = int((time.monotonic() - start) * 1000)
-
-    desktop_png = f"sites/{deps.spec.site_slug}/evidence/desktop.png"
-    mobile_png = f"sites/{deps.spec.site_slug}/evidence/mobile.png"
-
-    try:
-        parsed = parse_playwright_json(
-            stdout_b.decode("utf-8", errors="replace"), elapsed_ms, desktop_png, mobile_png
+        port = _free_loopback_port()
+        env = clean_exec_env(
+            {
+                "SITE_SLUG": deps.spec.site_slug,
+                "SITE_WORKTREE_ROOT": deps.worktree_dir,
+                "SITE_SERVER_PORT": str(port),
+                "PW_REPORTER": "json",
+                "WRITE_EVIDENCE": "1",
+                "STRICT_COPY": "1",
+            }
         )
-    except Exception as exc:
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"playwright invocation failed ({proc.returncode}): "
-                f"{stderr_b.decode('utf-8', errors='replace').strip()}"
-            ) from exc
-        raise RuntimeError(f"parse playwright json: {exc}") from exc
 
-    if proc.returncode != 0 and parsed["passed"]:
-        parsed["passed"] = False
-        parsed["failures"].append(
-            FailureEvidence(
-                check_name="playwright-exit-code",
-                expected="exit 0",
-                actual=f"exit {proc.returncode}",
-                remediation=stderr_b.decode("utf-8", errors="replace").strip(),
-            ).model_dump()
+        start = time.monotonic()
+        proc = await asyncio.create_subprocess_exec(
+            "npx",
+            "playwright",
+            "test",
+            "--reporter=json",
+            cwd=deps.websites_repo_path,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-    deps.last_pw_result = parsed
-    return parsed
+        stdout_b, stderr_b = await proc.communicate()
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+
+        desktop_png = f"sites/{deps.spec.site_slug}/evidence/desktop.png"
+        mobile_png = f"sites/{deps.spec.site_slug}/evidence/mobile.png"
+
+        try:
+            parsed = parse_playwright_json(
+                stdout_b.decode("utf-8", errors="replace"), elapsed_ms, desktop_png, mobile_png
+            )
+        except Exception as exc:
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"playwright invocation failed ({proc.returncode}): "
+                    f"{stderr_b.decode('utf-8', errors='replace').strip()}"
+                ) from exc
+            raise RuntimeError(f"parse playwright json: {exc}") from exc
+
+        if proc.returncode != 0 and parsed["passed"]:
+            parsed["passed"] = False
+            parsed["failures"].append(
+                FailureEvidence(
+                    check_name="playwright-exit-code",
+                    expected="exit 0",
+                    actual=f"exit {proc.returncode}",
+                    remediation=stderr_b.decode("utf-8", errors="replace").strip(),
+                ).model_dump()
+            )
+        span.set_attribute("playwright.passed", bool(parsed["passed"]))
+        span.set_attribute("playwright.duration_ms", elapsed_ms)
+        span.set_attribute("playwright.checks_count", len(parsed["checks"]))
+        span.set_attribute("playwright.failures_count", len(parsed["failures"]))
+        deps.last_pw_result = parsed
+        return parsed
 
 
 def inspect_git_diff(worktree_dir: str, slug: str) -> dict[str, Any]:

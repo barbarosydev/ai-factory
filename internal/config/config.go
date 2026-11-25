@@ -119,6 +119,11 @@ type Config struct {
 	MaxConcurrentActivities int
 	MetricsAddr             string
 	LogFormat               string
+	OTelDisabled            bool
+	OTelEndpoint            string
+	OTelProjectName         string
+	OTelCaptureContent      bool
+	PhoenixUIURL            string
 	Policy                  WorkflowPolicy
 	PMKey                   string
 	DevKey                  string
@@ -146,6 +151,11 @@ func LoadFromEnv() (Config, error) {
 		MaxConcurrentActivities: envIntOr("FACTORY_MAX_CONCURRENT_ACTIVITIES", 1),
 		MetricsAddr:             envOr("FACTORY_METRICS_ADDR", "127.0.0.1:9091"),
 		LogFormat:               strings.ToLower(envOr("FACTORY_LOG_FORMAT", "text")),
+		OTelDisabled:            os.Getenv("OTEL_SDK_DISABLED") == "1" || strings.EqualFold(os.Getenv("OTEL_SDK_DISABLED"), "true"),
+		OTelEndpoint:            strings.TrimRight(envOr("OTEL_EXPORTER_OTLP_ENDPOINT", "http://phoenix.localhost:8080"), "/"),
+		OTelProjectName:         envOr("FACTORY_OTEL_PROJECT_NAME", "ai-factory"),
+		OTelCaptureContent:      os.Getenv("FACTORY_OTEL_CAPTURE_CONTENT") == "1" || strings.EqualFold(os.Getenv("FACTORY_OTEL_CAPTURE_CONTENT"), "true"),
+		PhoenixUIURL:            strings.TrimRight(envOr("FACTORY_PHOENIX_URL", "http://phoenix.localhost:8080"), "/"),
 		Policy:                  defPolicy,
 		PMKey:                   os.Getenv("LITELLM_PM_KEY"),
 		DevKey:                  os.Getenv("LITELLM_DEV_KEY"),
@@ -232,6 +242,9 @@ func LoadFromEnv() (Config, error) {
 	}
 	if len(cfg.AllowedGitHubUsers) == 0 {
 		return Config{}, errors.New("FACTORY_ALLOWED_GITHUB_USERS must contain at least one GitHub username")
+	}
+	if !cfg.OTelDisabled && !strings.HasPrefix(cfg.OTelEndpoint, "http://") && !strings.HasPrefix(cfg.OTelEndpoint, "https://") {
+		return Config{}, fmt.Errorf("invalid OTEL_EXPORTER_OTLP_ENDPOINT %q: must start with http:// or https://", cfg.OTelEndpoint)
 	}
 	return cfg, nil
 }

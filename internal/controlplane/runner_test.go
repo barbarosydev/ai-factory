@@ -33,7 +33,7 @@ func TestNewWorkflowReceivesConfiguredAgentQueue(t *testing.T) {
 	run.On("GetRunID").Return("run-42")
 
 	id, err := ensureStartedOrSignaled(context.Background(), tc, cfg,
-		contracts.CustomerIssueInput{IssueNumber: 42}, RunOptions{}, io.Discard)
+		contracts.CustomerIssueInput{IssueNumber: 42}, RunOptions{}, nil, io.Discard)
 	require.NoError(t, err)
 	require.Equal(t, "run-42", id)
 }

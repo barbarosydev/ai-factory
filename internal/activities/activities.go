@@ -10,6 +10,7 @@ import (
 	"github.com/barbarosydev/ai-factory/internal/config"
 	"github.com/barbarosydev/ai-factory/internal/contracts"
 	"github.com/barbarosydev/ai-factory/internal/gitworktree"
+	"github.com/barbarosydev/ai-factory/internal/telemetry"
 )
 
 // IssueTransition describes a factory label swap and optional comment/close on GitHub.
@@ -34,6 +35,10 @@ type PRRequest struct {
 	Review       contracts.ReviewResult         `json:"review"`
 	Attempts     int                            `json:"attempts"`
 	AutonomyMode config.AutonomyMode            `json:"autonomy_mode"`
+	WorkflowID   string                         `json:"workflow_id,omitempty"`
+	RunID        string                         `json:"run_id,omitempty"`
+	TraceID      string                         `json:"trace_id,omitempty"`
+	PhoenixURL   string                         `json:"phoenix_url,omitempty"`
 }
 
 // PRResult is returned after opening or updating a GitHub Pull Request.
@@ -116,8 +121,10 @@ type CleanupInput struct {
 // FactoryActivities implements all Temporal activities for IssueFactoryWorkflow.
 // Credentials remain encapsulated inside private client fields and never enter Temporal payloads.
 type FactoryActivities struct {
-	Git    *gitworktree.Manager
-	GitHub IssueController
+	Git            *gitworktree.Manager
+	GitHub         IssueController
+	TracingEnabled bool
+	PhoenixUIURL   string
 }
 
 // TransitionIssueStateActivity updates factory:* labels and comments on GitHub.
@@ -146,6 +153,12 @@ func (a *FactoryActivities) PublishPullRequestActivity(ctx context.Context, in P
 		return PRResult{}, err
 	}
 	branch := gitworktree.BranchName(in.IssueNumber)
+	wfID, runID := safeActivityExecutionInfo(ctx)
+	traceID := telemetry.CurrentTraceID(ctx)
+	phoenixURL := ""
+	if a.TracingEnabled && traceID != "" && strings.TrimSpace(a.PhoenixUIURL) != "" {
+		phoenixURL = strings.TrimRight(a.PhoenixUIURL, "/")
+	}
 	return a.GitHub.OpenPullRequest(ctx, PRRequest{
 		IssueNumber:  in.IssueNumber,
 		IssueTitle:   strings.TrimSpace(in.IssueTitle),
@@ -157,7 +170,21 @@ func (a *FactoryActivities) PublishPullRequestActivity(ctx context.Context, in P
 		Review:       in.Review,
 		Attempts:     in.Attempts,
 		AutonomyMode: in.AutonomyMode,
+		WorkflowID:   wfID,
+		RunID:        runID,
+		TraceID:      traceID,
+		PhoenixURL:   phoenixURL,
 	})
+}
+
+func safeActivityExecutionInfo(ctx context.Context) (wfID, runID string) {
+	defer func() {
+		if recover() != nil {
+			wfID, runID = "", ""
+		}
+	}()
+	info := activity.GetInfo(ctx)
+	return info.WorkflowExecution.ID, info.WorkflowExecution.RunID
 }
 
 // AwaitChecksAndMergeActivity waits for PR CI checks (unless skipped) and squash-merges in auto mode.

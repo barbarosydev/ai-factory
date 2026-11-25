@@ -43,7 +43,16 @@ def clean_exec_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     for key, val in candidate.items():
         upper = key.upper()
         if (
-            upper.startswith(("LITELLM_", "GITHUB_APP_", "GITHUB_INSTALLATION_", "AI_FACTORY_GIT_"))
+            upper.startswith(
+                (
+                    "LITELLM_",
+                    "GITHUB_APP_",
+                    "GITHUB_INSTALLATION_",
+                    "AI_FACTORY_GIT_",
+                    "OTEL_",
+                    "PHOENIX_",
+                )
+            )
             or upper.endswith(("_KEY", "_SECRET", "_TOKEN", "_PASSWORD", "_PEM"))
             or "PRIVATE_KEY" in upper
         ):

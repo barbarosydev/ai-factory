@@ -26,4 +26,4 @@ Go and Python implementations duplicated the same four agent roles, tooling, pro
 - There is one implementation of each agent role and one agent-tooling/security boundary to maintain.
 - Temporal remains polyglot only at the Go control-plane/Python activity-worker boundary; Go agent execution is not a supported fallback.
 - Agent call/token/Playwright metrics formerly emitted by the Go process are not available on its `/metrics` endpoint. LiteLLM spend logs, Temporal histories, and test reports remain available.
-- Cross-language tracing across Temporal, the Python worker, and LiteLLM, including Phoenix trace provenance, is not currently implemented.
+- Cross-language tracing across Temporal, the Python worker, and LiteLLM, including Phoenix trace provenance, was deferred at the time of this ADR and subsequently implemented in [ADR 0010](0010-opentelemetry-and-phoenix-observability.md).

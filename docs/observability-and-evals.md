@@ -1,8 +1,59 @@
 # Observability, Configurability & Agent Evaluation
 
-`ai-factory` exposes Go control-plane workflow telemetry alongside LiteLLM proxy logs, Temporal event histories, and deterministic Playwright reports. Agent call/token/Playwright metrics from the deleted in-process Go agents are no longer exported by the Go process.
+`ai-factory` combines end-to-end **OpenTelemetry + OpenInference** distributed tracing in **Arize Phoenix** (`http://phoenix.localhost:8080`), **LiteLLM** usage/spend dashboards (`http://litellm.localhost:8080/ui/usage/` and `/ui/logs/`), **Temporal** event histories (`http://temporal.localhost:8080`), and Go control-plane Prometheus `/metrics`.
 
-## 1. Runtime Probes & Prometheus `/metrics`
+## 1. End-to-End Distributed Tracing (Arize Phoenix + OpenInference)
+
+Both processes export OTLP HTTP/protobuf spans directly to Arize Phoenix under the `ai-factory` project (`openinference.project.name = "ai-factory"`), stitched across Go and Python via Temporal's `_tracer-data` W3C `traceparent` header ([ADR 0010](adr/0010-opentelemetry-and-phoenix-observability.md)):
+
+```mermaid
+flowchart TD
+  ROOT["factory.issue (Go Poller root span)"] --> WF["RunWorkflow:IssueFactoryWorkflow (Go Temporal Worker)"]
+  WF --> PM_ACT["RunActivity:RunPMAgentActivity (Python Worker)"]
+  PM_ACT --> PM_RUN["agent run -> chat pm-agent (OpenInference AGENT / LLM)"]
+  WF --> DEV_ACT["RunActivity:RunDeveloperAgentActivity (Python Worker)"]
+  DEV_ACT --> DEV_RUN["agent run -> chat dev-agent + write_site_bundle (AGENT / LLM / TOOL)"]
+  WF --> TEST_ACT["RunActivity:RunTesterAgentActivity (Python Worker)"]
+  TEST_ACT --> PW["playwright.verify_site (EVALUATOR)"]
+  WF --> REV_ACT["RunActivity:RunReviewerActivity (Python Worker)"]
+  WF --> PR_ACT["RunActivity:PublishPullRequestActivity (writes Workflow ID, Run ID & Trace ID to PR)"]
+```
+
+### Privacy & Resilience Defaults
+
+- **Metadata-only by default (`FACTORY_OTEL_CAPTURE_CONTENT=false`)**: Spans record workflow/activity names, model routes, token counts, tool names, latencies, status codes, and `playwright.verify_site` pass/fail counts while omitting untrusted GitHub issue text, system prompts, completions, and file-write payloads. Set `FACTORY_OTEL_CAPTURE_CONTENT=true` temporarily when debugging prompt behavior locally.
+- **No W3C Baggage & scrubbed child env**: Only W3C `traceparent`/`tracestate` headers propagate; `clean_exec_env()` strips `OTEL_*` and `PHOENIX_*` before spawning Playwright or git subprocesses.
+- **Fail-open runtime, fail-fast `doctor`**: Bounded `BatchSpanProcessor` queues drop spans with rate-limited warnings if Phoenix is unreachable so active factory runs never crash, whereas `task doctor` fails fast unless `OTEL_SDK_DISABLED=true`.
+- **PR Provenance**: Every generated Pull Request records `Temporal Workflow`, `Run ID`, and `OpenTelemetry Trace ID` in its summary for instant lookup in Temporal Web UI and Phoenix UI.
+
+---
+
+## 2. LiteLLM Usage & Spend Correlation (`/ui/usage/` & `/ui/logs/`)
+
+Each Python agent activity attaches per-request correlation headers when calling LiteLLM:
+
+- `x-litellm-tags: issue-<N>,role:<role>,attempt-<A>,site:<slug>`
+- `x-litellm-trace-id: <32-hex-otel-trace-id>`
+
+Because `ai-factory-infra` configures local reference token pricing (`model_info`) and 3-day spend/tag retention on LiteLLM, `http://litellm.localhost:8080/ui/usage/` populates spend charts, per-model breakdowns, virtual-key budget utilization, and **By Tags** filtering out of the box without deploying LiteLLM Lens (`BerriAI/lens` + ClickHouse).
+
+### Querying LiteLLM Postgres Spend Logs (`../ai-factory-infra`)
+
+```sql
+SELECT
+  model,
+  COUNT(*) AS calls,
+  ROUND(AVG(EXTRACT(EPOCH FROM ("endTime" - "startTime")))::numeric, 2) AS avg_sec,
+  SUM(prompt_tokens) AS prompt_toks,
+  SUM(completion_tokens) AS completion_toks
+FROM "LiteLLM_SpendLogs"
+GROUP BY model
+ORDER BY calls DESC;
+```
+
+---
+
+## 3. Runtime Probes & Prometheus `/metrics`
 
 When `ai-factory run` or `ai-factory once` starts, a loopback HTTP server runs on `FACTORY_METRICS_ADDR` (default `127.0.0.1:9091`; set `off` to disable):
 
@@ -19,38 +70,13 @@ When `ai-factory run` or `ai-factory once` starts, a loopback HTTP server runs o
 - `ai_factory_workflow_duration_seconds_sum` / `_count` — End-to-end issue duration
 - `ai_factory_repair_attempts_total` — Total build/verify attempts consumed
 
-Enable structured JSON logs (`log/slog`) for Kubernetes log shippers by setting `FACTORY_LOG_FORMAT=json`.
-
-The shared website Playwright suite verifies desktop (`1280x800`) and mobile (`375x812`) layouts; successful factory verification explicitly enables `WRITE_EVIDENCE=1` to persist deliverable screenshots.
+Enable structured JSON logs (`log/slog`) with `trace_id` correlation by setting `FACTORY_LOG_FORMAT=json`.
 
 ---
 
-## 2. Measuring Agent Performance (`evals` & `LiteLLM_SpendLogs`)
+## 4. Configurable Policy & Runtime Environment Variables
 
-Use LiteLLM `LiteLLM_SpendLogs` for model-call counts, tokens, and duration. Use Temporal histories and the recorded attempt/test reports for workflow stage and gate outcomes; the Go `/metrics` endpoint currently exports control-plane workflow counts/duration/attempts only.
-
-### Querying LiteLLM Postgres Spend Logs (`../ai-factory-infra`)
-Every LLM call sends `X-Litellm-Tag: issue-<N>,role-<role>`. Query per-agent token consumption and durations from the `litellm` database inside `ai-factory-infra`:
-
-```sql
-SELECT
-  model,
-  COUNT(*) AS calls,
-  ROUND(AVG(EXTRACT(EPOCH FROM ("endTime" - "startTime")))::numeric, 2) AS avg_sec,
-  SUM(prompt_tokens) AS prompt_toks,
-  SUM(completion_tokens) AS completion_toks
-FROM "LiteLLM_SpendLogs"
-GROUP BY model
-ORDER BY calls DESC;
-```
-
-You can also filter calls interactively in the LiteLLM UI (`http://litellm.localhost:8080/ui`) and inspect durable workflow histories in the Temporal Web UI (`http://temporal.localhost:8080`).
-
----
-
-## 3. Configurable Policy & Runtime Environment Variables
-
-Repair caps, wait timeouts, activity timeouts, and worker concurrency are configurable via `FACTORY_*` environment variables ([internal/config/config.go](../internal/config/config.go)):
+Repair caps, wait timeouts, activity timeouts, worker concurrency, and OpenTelemetry settings are configurable via environment variables ([internal/config/config.go](../internal/config/config.go) and [agents_py/src/agents_py/telemetry.py](../agents_py/src/agents_py/telemetry.py)):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -66,5 +92,8 @@ Repair caps, wait timeouts, activity timeouts, and worker concurrency are config
 | `FACTORY_LOG_FORMAT` | `text` | Structured `log/slog` format (`text` or `json`) |
 | `FACTORY_ALLOWED_GITHUB_USERS` | `barbarosydev` | Comma-separated GitHub usernames permitted to trigger issues or send clarification replies |
 | `FACTORY_AGENT_TASK_QUEUE` | `ai-factory-agents` | Temporal task queue for Python PydanticAI activities |
-
-OpenTelemetry traces are not currently propagated across Temporal, the Python worker, and LiteLLM. Phoenix trace provenance is also unavailable, and PRs do not include trace IDs.
+| `OTEL_SDK_DISABLED` | `false` | Set `true` to disable OpenTelemetry export and skip the Phoenix `doctor` check |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://phoenix.localhost:8080` | OTLP HTTP base URL (normalized to `/v1/traces` without path doubling) |
+| `FACTORY_OTEL_PROJECT_NAME` | `ai-factory` | Phoenix `openinference.project.name` resource attribute |
+| `FACTORY_OTEL_CAPTURE_CONTENT` | `false` | Metadata-only spans when `false`; set `true` locally to include prompts/completions/tool args |
+| `FACTORY_PHOENIX_URL` | `http://phoenix.localhost:8080` | Local Phoenix UI base URL probed by `task doctor` and referenced in PR summaries |

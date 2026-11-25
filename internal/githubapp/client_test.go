@@ -303,6 +303,10 @@ func TestGitHubControllerWorkflowAndPoller(t *testing.T) {
 		CommitSHA:    "abc123def",
 		Attempts:     1,
 		AutonomyMode: config.AutonomyAuto,
+		WorkflowID:   "issue-factory-10",
+		RunID:        "run-uuid-1234",
+		TraceID:      "0123456789abcdef0123456789abcdef",
+		PhoenixURL:   "http://phoenix.localhost:8080",
 		Spec: contracts.WebsiteSpecification{
 			SchemaVersion: "v1",
 			SiteSlug:      "cafe-one",
@@ -335,6 +339,8 @@ func TestGitHubControllerWorkflowAndPoller(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 77, pr.Number)
 	require.Contains(t, prCreatedBody, "Closes #10")
+	require.Contains(t, prCreatedBody, "**Temporal Workflow**: `issue-factory-10` (run `run-uuid-1234`)")
+	require.Contains(t, prCreatedBody, "**OpenTelemetry Trace ID**: `0123456789abcdef0123456789abcdef` (local-only Phoenix UI: http://phoenix.localhost:8080)")
 	require.Contains(t, prCreatedBody, "https://github.com/barbarosydev/ai-factory-websites/blob/abc123def/sites/cafe-one/evidence/desktop.png?raw=true")
 	require.Contains(t, prCreatedBody, "https://github.com/barbarosydev/ai-factory-websites/blob/abc123def/sites/cafe-one/evidence/mobile.png?raw=true")
 

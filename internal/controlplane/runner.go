@@ -8,10 +8,15 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/client"
+	temporalotel "go.temporal.io/sdk/contrib/opentelemetry"
+	"go.temporal.io/sdk/interceptor"
 	"go.temporal.io/sdk/worker"
 
 	"github.com/barbarosydev/ai-factory/internal/activities"
@@ -44,6 +49,18 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	}
 
 	logger := telemetry.NewLogger(cfg.LogFormat, out)
+	tp, shutdownTracing, err := telemetry.SetupTracing(ctx, telemetry.TracingConfig{
+		Enabled:      !cfg.OTelDisabled,
+		BaseEndpoint: cfg.OTelEndpoint,
+		ServiceName:  "ai-factory-controlplane",
+		ProjectName:  cfg.OTelProjectName,
+		Logger:       logger,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	reg := telemetry.NewRegistry()
 	stopMetrics, err := telemetry.StartServer(ctx, cfg.MetricsAddr, reg, logger)
 	if err != nil {
@@ -61,14 +78,27 @@ func Run(ctx context.Context, cfg config.Config, opts RunOptions, out io.Writer)
 	gitMgr = gitworktree.NewManager(cfg.WebsitesRepoPath, cfg.GitHubAppID, auth.Token)
 
 	acts := &activities.FactoryActivities{
-		Git:    gitMgr,
-		GitHub: ghClient,
+		Git:            gitMgr,
+		GitHub:         ghClient,
+		TracingEnabled: !cfg.OTelDisabled,
+		PhoenixUIURL:   cfg.PhoenixUIURL,
 	}
 
-	tc, err := client.Dial(client.Options{
+	dialOpts := client.Options{
 		HostPort:  cfg.TemporalAddress,
 		Namespace: cfg.TemporalNamespace,
-	})
+	}
+	if !cfg.OTelDisabled {
+		tracingInterceptor, err := temporalotel.NewTracingInterceptor(temporalotel.TracerOptions{
+			Tracer: tp.Tracer("ai-factory.temporal"),
+		})
+		if err != nil {
+			return fmt.Errorf("create temporal tracing interceptor: %w", err)
+		}
+		dialOpts.Interceptors = []interceptor.ClientInterceptor{tracingInterceptor}
+	}
+
+	tc, err := client.Dial(dialOpts)
 	if err != nil {
 		return fmt.Errorf("dial temporal %s: %w", cfg.TemporalAddress, err)
 	}
@@ -136,7 +166,7 @@ func runOnce(
 	}
 
 	wfID := workflow.WorkflowID(issue.IssueNumber)
-	runID, err := ensureStartedOrSignaled(ctx, tc, cfg, issue, opts, out)
+	runID, err := ensureStartedOrSignaled(ctx, tc, cfg, issue, opts, logger, out)
 	if err != nil {
 		return err
 	}
@@ -225,7 +255,7 @@ func runPoller(
 			return
 		}
 		nextIssue := polled.Ready[0]
-		runID, err := ensureStartedOrSignaled(ctx, tc, cfg, nextIssue, opts, out)
+		runID, err := ensureStartedOrSignaled(ctx, tc, cfg, nextIssue, opts, logger, out)
 		if err != nil {
 			_, _ = fmt.Fprintf(out, "start workflow for issue #%d error: %v\n", nextIssue.IssueNumber, err)
 			return
@@ -361,10 +391,25 @@ func ensureStartedOrSignaled(
 	cfg config.Config,
 	issue contracts.CustomerIssueInput,
 	opts RunOptions,
+	logger *slog.Logger,
 	out io.Writer,
 ) (string, error) {
 	wfID := workflow.WorkflowID(issue.IssueNumber)
-	running, st, runID, err := describeFactoryStage(ctx, tc, wfID)
+	issueCtx, span := otel.Tracer("ai-factory.controlplane").Start(
+		ctx,
+		"factory.issue",
+		trace.WithNewRoot(),
+		trace.WithAttributes(
+			attribute.Int("factory.issue_number", issue.IssueNumber),
+			attribute.String("factory.request_type", issue.RequestType),
+			attribute.String("factory.autonomy_mode", string(opts.AutonomyMode)),
+			attribute.String("factory.workflow_id", wfID),
+		),
+	)
+	defer span.End()
+	traceID := telemetry.CurrentTraceID(issueCtx)
+
+	running, st, runID, err := describeFactoryStage(issueCtx, tc, wfID)
 	if err == nil && running {
 		if st.Stage == "waiting_human" {
 			sig := workflow.HumanReplySignal{
@@ -374,8 +419,11 @@ func ensureStartedOrSignaled(
 				CreatedAt:        time.Now().UTC().Format(time.RFC3339),
 				UpdatedIssueBody: issue.IssueBody,
 			}
-			if sigErr := tc.SignalWorkflow(ctx, wfID, runID, workflow.SignalHumanReply, sig); sigErr != nil {
+			if sigErr := tc.SignalWorkflow(issueCtx, wfID, runID, workflow.SignalHumanReply, sig); sigErr != nil {
 				return "", fmt.Errorf("resume waiting workflow %s: %w", wfID, sigErr)
+			}
+			if logger != nil {
+				logger.Info("resumed paused workflow", "workflow_id", wfID, "run_id", runID, "issue", issue.IssueNumber, "trace_id", traceID)
 			}
 			_, _ = fmt.Fprintf(out, "resumed paused workflow %s (run=%s)\n", wfID, runID)
 			return runID, nil
@@ -384,7 +432,7 @@ func ensureStartedOrSignaled(
 		return runID, nil
 	}
 
-	run, err := tc.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+	run, err := tc.ExecuteWorkflow(issueCtx, client.StartWorkflowOptions{
 		ID:                    wfID,
 		TaskQueue:             cfg.TaskQueue,
 		WorkflowIDReusePolicy: enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
@@ -397,6 +445,15 @@ func ensureStartedOrSignaled(
 	})
 	if err != nil {
 		return "", err
+	}
+	if logger != nil {
+		logger.Info("started workflow",
+			"workflow_id", wfID,
+			"run_id", run.GetRunID(),
+			"issue", issue.IssueNumber,
+			"mode", opts.AutonomyMode,
+			"trace_id", traceID,
+		)
 	}
 	_, _ = fmt.Fprintf(out, "started workflow %s (run=%s issue=#%d mode=%s)\n", wfID, run.GetRunID(), issue.IssueNumber, opts.AutonomyMode)
 	return run.GetRunID(), nil
