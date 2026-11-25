@@ -40,6 +40,7 @@ func RunDoctor(ctx context.Context, cfg config.Config, ollamaBaseURL string, str
 			"sec-agent":  cfg.SecKey,
 		}),
 		checkOllama(ctx, ollamaBaseURL),
+		checkPhoenix(ctx, cfg),
 		checkGitHubApp(ctx, cfg, strictGitHub),
 	}
 
@@ -231,6 +232,52 @@ func checkOllama(ctx context.Context, ollamaBaseURL string) CheckResult {
 		Name:   "ollama",
 		Status: "PASS",
 		Detail: fmt.Sprintf("gemma4:12b and gemma4:e4b installed at %s", ollamaBaseURL),
+	}
+}
+
+func checkPhoenix(ctx context.Context, cfg config.Config) CheckResult {
+	if cfg.OTelDisabled {
+		return CheckResult{
+			Name:   "phoenix-otel",
+			Status: "PASS",
+			Detail: "tracing explicitly disabled (OTEL_SDK_DISABLED=true)",
+		}
+	}
+	uiURL := strings.TrimRight(cfg.PhoenixUIURL, "/")
+	if uiURL == "" {
+		uiURL = strings.TrimRight(cfg.OTelEndpoint, "/")
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, uiURL+"/readyz", nil)
+	if err != nil {
+		return CheckResult{Name: "phoenix-otel", Status: "FAIL", Detail: err.Error()}
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	if err != nil {
+		return CheckResult{
+			Name:   "phoenix-otel",
+			Status: "FAIL",
+			Detail: fmt.Sprintf("Phoenix unreachable at %s/readyz (ensure ai-factory-infra is up or set OTEL_SDK_DISABLED=true): %v", uiURL, err),
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return CheckResult{
+			Name:   "phoenix-otel",
+			Status: "FAIL",
+			Detail: fmt.Sprintf("HTTP %d from %s/readyz", resp.StatusCode, uiURL),
+		}
+	}
+	mode := "metadata-only"
+	if cfg.OTelCaptureContent {
+		mode = "content-capture-enabled"
+	}
+	return CheckResult{
+		Name:   "phoenix-otel",
+		Status: "PASS",
+		Detail: fmt.Sprintf("ready at %s (project=%s, mode=%s)", uiURL, cfg.OTelProjectName, mode),
 	}
 }
 

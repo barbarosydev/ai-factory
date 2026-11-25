@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/barbarosydev/ai-factory/internal/config"
 )
 
 func TestDoctorLiteLLMAndOllamaChecks(t *testing.T) {
@@ -63,4 +65,44 @@ func TestDoctorWebsitesRepoCheck(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(tmp, "node_modules", "@playwright", "test"), 0o755))
 
 	require.Equal(t, "PASS", checkWebsitesRepo(tmp).Status)
+}
+
+func TestDoctorPhoenixCheck(t *testing.T) {
+	ctx := context.Background()
+
+	disabledRes := checkPhoenix(ctx, config.Config{OTelDisabled: true})
+	require.Equal(t, "PASS", disabledRes.Status)
+	require.Contains(t, disabledRes.Detail, "OTEL_SDK_DISABLED=true")
+
+	readyOK := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/readyz" && readyOK {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	passMeta := checkPhoenix(ctx, config.Config{
+		PhoenixUIURL:    srv.URL,
+		OTelProjectName: "ai-factory",
+	})
+	require.Equal(t, "PASS", passMeta.Status)
+	require.Contains(t, passMeta.Detail, "mode=metadata-only")
+
+	passContent := checkPhoenix(ctx, config.Config{
+		PhoenixUIURL:       srv.URL,
+		OTelProjectName:    "ai-factory",
+		OTelCaptureContent: true,
+	})
+	require.Equal(t, "PASS", passContent.Status)
+	require.Contains(t, passContent.Detail, "mode=content-capture-enabled")
+
+	readyOK = false
+	failRes := checkPhoenix(ctx, config.Config{
+		PhoenixUIURL:    srv.URL,
+		OTelProjectName: "ai-factory",
+	})
+	require.Equal(t, "FAIL", failRes.Status)
 }

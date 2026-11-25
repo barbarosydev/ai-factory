@@ -8,7 +8,8 @@ Local-first asynchronous multi-agent AI Software Factory powered by Temporal, Li
 - Sequential activity execution (`MaxConcurrentActivityExecutionSize = 1`; leaving `MaxConcurrentWorkflowTaskExecutionSize` unset per Go SDK sticky cache requirements) fits comfortably inside the Mac's 36 GB unified memory.
 - Four PydanticAI roles use dedicated LiteLLM routes and scoped virtual keys (`pm-agent`, `dev-agent`, `test-agent`, `sec-agent`), connected through compatible typed JSON contracts.
 - Developer Agent edits stay jailed to `.worktrees/issue-<N>/sites/<slug>/` via Python `SiteSandbox`, using `write_site_bundle` and granular file/structure tools.
-- Long-running agent activities emit periodic 15-second Temporal heartbeats (`startHeartbeatLoop`) and enforce bounded self-correction (max 3 attempts).
+- Long-running agent activities emit periodic 15-second Temporal heartbeats (`heartbeat_loop`) and enforce bounded self-correction (max 3 attempts).
+- Go and Python workers propagate W3C `traceparent` across Temporal `_tracer-data` headers and export metadata-only OpenTelemetry + OpenInference spans (`FACTORY_OTEL_CAPTURE_CONTENT=false` by default) directly to Arize Phoenix (`http://phoenix.localhost:8080`).
 
 ## Commands
 

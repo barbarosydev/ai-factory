@@ -34,7 +34,7 @@
 
 Run `task status` to view active Temporal `IssueFactoryWorkflow` executions (`Stage`, `Attempt`, `SiteSlug`), currently loaded Ollama models, and open `factory:*` issues in `barbarosydev/ai-factory-websites`.
 
-Temporal Web UI is also available locally at `http://temporal.localhost:8080`.
+Temporal Web UI (`http://temporal.localhost:8080`), Arize Phoenix trace UI (`http://phoenix.localhost:8080`), and LiteLLM usage/spend UI (`http://litellm.localhost:8080/ui/usage/`) are available locally while `../ai-factory-infra` is running. Every generated PR summary records its `Temporal Workflow`, `Run ID`, and `OpenTelemetry Trace ID`. To capture raw prompt/completion text locally during debugging, run with `FACTORY_OTEL_CAPTURE_CONTENT=true` (default is `false`, metadata-only).
 
 ## Human-in-the-Loop Clarification (`factory:waiting`)
 

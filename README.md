@@ -29,18 +29,18 @@ flowchart LR
 
 - **[User & Operator Journey](docs/user-journey.md)** — Customer workflow, operator commands, and verified end-to-end run results
 - **[Architecture](docs/architecture.md)** — Cross-repository system view, state machine, and package map
-- **[Observability, Evals & Configurability](docs/observability-and-evals.md)** — Prometheus `/metrics`, `/healthz`/`/readyz`, token/latency KPIs, and `FACTORY_*` timeout/retry knobs
+- **[Observability, Evals & Configurability](docs/observability-and-evals.md)** — Arize Phoenix OpenInference traces, LiteLLM `/ui/usage/` correlation, Prometheus `/metrics`, and `FACTORY_*` knobs
 - **[Kubernetes & AKS Migration](docs/deployment-k8s-aks.md)** — 12-factor container/probe readiness and multi-GPU cloud scaling path
 - **[Prerequisites](docs/prerequisites.md)** & **[GitHub App Setup](docs/github-app-setup.md)** — Fresh-Mac installation and Keychain setup
 - **[Operations Runbook](docs/runbook.md)** — Daily startup, monitoring (`task status`), and debugging failed snapshots
 - **[AI Agent Harness](docs/harness.md)** — Rules, permissions, Conftest policies, review roles, and tested hooks
-- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0009`
+- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0010`
 
 ## Ecosystem Repositories
 
 | Repository | Role |
 | --- | --- |
-| **[`ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra)** | Local platform infrastructure (k3d, CloudNativePG PostgreSQL 18, Temporal, LiteLLM, Ollama Metal GPU, Terraform/Helm) |
+| **[`ai-factory-infra`](https://github.com/barbarosydev/ai-factory-infra)** | Local platform infrastructure (k3d, CloudNativePG PostgreSQL 18, Temporal, LiteLLM, Arize Phoenix, Ollama Metal GPU, Terraform/Helm) |
 | **`ai-factory`** *(this repo)* | Go control plane, PydanticAI Python Temporal worker, Git worktree manager, GitHub App poller, CLI |
 | **[`ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites)** | Target website monorepo (`sites/<slug>/`), root Playwright verification harness, GitHub Issue Forms & Actions CI |
 

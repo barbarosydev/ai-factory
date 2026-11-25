@@ -524,7 +524,22 @@ func (c *Client) formatPRBody(req activities.PRRequest) string {
 	fmt.Fprintf(&b, "- **Theme**: primary `%s`, background `%s`, accent `%s`, font `%s`\n",
 		req.Spec.Theme.PrimaryColor, req.Spec.Theme.BackgroundColor, req.Spec.Theme.AccentColor, req.Spec.Theme.FontPairing)
 	fmt.Fprintf(&b, "- **Repair Attempts**: %d\n", req.Attempts)
-	fmt.Fprintf(&b, "- **Autonomy Mode**: `%s`\n\n", req.AutonomyMode)
+	fmt.Fprintf(&b, "- **Autonomy Mode**: `%s`\n", req.AutonomyMode)
+	if req.WorkflowID != "" {
+		if req.RunID != "" {
+			fmt.Fprintf(&b, "- **Temporal Workflow**: `%s` (run `%s`)\n", req.WorkflowID, req.RunID)
+		} else {
+			fmt.Fprintf(&b, "- **Temporal Workflow**: `%s`\n", req.WorkflowID)
+		}
+	}
+	if req.TraceID != "" {
+		if req.PhoenixURL != "" {
+			fmt.Fprintf(&b, "- **OpenTelemetry Trace ID**: `%s` (local-only Phoenix UI: %s)\n", req.TraceID, req.PhoenixURL)
+		} else {
+			fmt.Fprintf(&b, "- **OpenTelemetry Trace ID**: `%s`\n", req.TraceID)
+		}
+	}
+	b.WriteString("\n")
 
 	b.WriteString("## Security & Reviewer Audit (`sec-agent`)\n\n")
 	fmt.Fprintf(&b, "- **Approved**: `%t` | **Path Isolation**: `%t` | **Zero External Assets**: `%t` | **Spec Fidelity**: `%t`\n\n",

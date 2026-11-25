@@ -87,6 +87,62 @@ async def test_pm_agent_structured_output_and_normalization(tmp_path: pathlib.Pa
     assert len(out.spec.navigation) == 3
 
 
+async def test_pm_agent_repairs_garbled_utf8_on_modify(tmp_path: pathlib.Path) -> None:
+    site_dir = tmp_path / "sites" / "buchhandlung-morgenrot"
+    site_dir.mkdir(parents=True)
+    (site_dir / "spec.json").write_text(
+        json.dumps(
+            {
+                "site_slug": "buchhandlung-morgenrot",
+                "page_title": "Buchhandlung Morgenrot — Neukölln",
+                "footer_text": "© 2026 Buchhandlung Morgenrot · Weserstraße 48, 12045 Berlin",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def _garbled_pm(_: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        tool_name = info.output_tools[0].name
+        payload = {
+            "status": "ready",
+            "spec": {
+                "site_slug": "buchhandlung-morgenrot",
+                "operation": "modify",
+                "page_title": "Buchhandlung Morgenrot — Neukölln",
+                "footer_text": "© 2026 Buchhandlung Morgenrot · Weserstraìee 48, 12045 Berlin",
+                "sections": [
+                    {"id": "hero", "heading": "Hero", "required_keywords": ["Neukölln"]},
+                    {"id": "events", "heading": "Events", "required_keywords": ["Readings"]},
+                    {
+                        "id": "visit",
+                        "heading": "Visit",
+                        "purpose": "Visit Weserstraìee 48.",
+                        "required_keywords": ["Weserstraìee 48"],
+                    },
+                ],
+            },
+        }
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name=tool_name, args=json.dumps(payload, ensure_ascii=False))]
+        )
+
+    out = await run_pm_agent(
+        CustomerIssueInput(
+            issue_number=26,
+            issue_title="[Modify Site]: Add Sunday Circle",
+            issue_body="Keep address Weserstraße 48, 12045 Berlin.",
+            request_type="modify_website",
+            target_site_slug="buchhandlung-morgenrot",
+        ),
+        str(tmp_path),
+        FunctionModel(_garbled_pm),
+    )
+    assert out.spec is not None
+    assert out.spec.footer_text == "© 2026 Buchhandlung Morgenrot · Weserstraße 48, 12045 Berlin"
+    assert out.spec.sections[2].required_keywords == ["Weserstraße 48"]
+
+
 async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None:
     wt = tmp_path / "wt"
     repo = tmp_path / "repo"
