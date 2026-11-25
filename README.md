@@ -29,12 +29,12 @@ flowchart LR
 
 - **[User & Operator Journey](docs/user-journey.md)** — Customer workflow, operator commands, and verified end-to-end run results
 - **[Architecture](docs/architecture.md)** — Cross-repository system view, state machine, and package map
-- **[Observability, Evals & Configurability](docs/observability-and-evals.md)** — Arize Phoenix OpenInference traces, LiteLLM `/ui/usage/` correlation, Prometheus `/metrics`, and `FACTORY_*` knobs
+- **[Observability, Evals & Configurability](docs/observability-and-evals.md)** — Arize Phoenix OpenInference traces, Promptfoo `task eval`, LiteLLM `/ui/usage/` correlation, Prometheus `/metrics`, and `FACTORY_*` knobs
 - **[Kubernetes & AKS Migration](docs/deployment-k8s-aks.md)** — 12-factor container/probe readiness and multi-GPU cloud scaling path
 - **[Prerequisites](docs/prerequisites.md)** & **[GitHub App Setup](docs/github-app-setup.md)** — Fresh-Mac installation and Keychain setup
 - **[Operations Runbook](docs/runbook.md)** — Daily startup, monitoring (`task status`), and debugging failed snapshots
 - **[AI Agent Harness](docs/harness.md)** — Rules, permissions, Conftest policies, review roles, and tested hooks
-- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0010`
+- **[Architecture Decision Records](docs/adr/README.md)** — ADRs `0001`–`0011`
 
 ## Ecosystem Repositories
 
@@ -67,3 +67,4 @@ task run        # human-review mode (factory:review)
 - `task status`: Inspect active/recent Temporal workflows, Ollama VRAM models, and open `factory:*` issues.
 - `task clean:failed`: Remove archived `.worktrees/issue-*-failed-*` snapshots in `../ai-factory-websites`.
 - `task ci`: Run all linters (`gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, `mypy`, Conftest `policy/`, `actionlint`, doc/command drift checks), Go and Python (`pytest`) unit/workflow/sandbox/hook tests, and `gitleaks`.
+- `task eval`: Run Promptfoo 12-case golden dataset & prompt-injection red-team evals against local LiteLLM (`pm-agent` + `sec-agent`).

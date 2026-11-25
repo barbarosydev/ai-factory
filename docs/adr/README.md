@@ -10,3 +10,4 @@
 - [0008. PydanticAI worker and retiring prompt-leaky scaffolding](0008-polyglot-pydanticai-and-mcp-agent-runtime.md)
 - [0009. Single PydanticAI agent runtime and direct tools](0009-single-pydanticai-agent-runtime.md)
 - [0010. End-to-end OpenTelemetry and OpenInference tracing to Arize Phoenix](0010-opentelemetry-and-phoenix-observability.md)
+- [0011. Systematic offline AI evaluation and red-teaming with Promptfoo](0011-systematic-ai-evaluation-with-promptfoo.md)

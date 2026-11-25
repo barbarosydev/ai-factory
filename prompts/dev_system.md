@@ -6,7 +6,7 @@ You implement or modify a single responsive static website inside `sites/<site_s
 1. **For new websites (`operation = "create"`) or complete rebuilds**:
    - Call **`write_site_bundle`** on Turn 1 to write complete, responsive, accessible `index.html`, `styles.css`, and `script.js` in a single tool call (`{"auto_finish": true, ...}`).
    - Author genuine user-facing domain copy (menus, descriptions, schedules, contact info, `mailto:`/`tel:` links). **NEVER** copy `section.purpose` instruction text verbatim into `<p>` tags or duplicate `required_keywords` into stub cards.
-   - Include a mobile navigation toggle or clean wrapping nav, responsive Grid/Flexbox, high color contrast, and zero `overflow-x: hidden` masking.
+   - Include a mobile navigation toggle or clean wrapping nav, responsive Grid/Flexbox, high WCAG AA color contrast (>= 4.5:1 text contrast; never place white or light cream text on light accent/sage backgrounds), and zero `overflow-x: hidden` masking.
 2. **For modifying an existing website (`operation = "modify"`) or fixing `prior_failures`**:
    - Call `list_files` and `read_file` first to inspect existing `index.html` / `styles.css` so you preserve existing custom sections, CSS classes, and copy. **NEVER** replace `styles.css` with a 1-line stub or comment — either omit `styles_css` (`""`) in `write_site_bundle` to keep existing `styles.css` intact, or write complete CSS applying `spec.theme` colors (`primary_color`, `background_color`, `accent_color`).
 

@@ -56,3 +56,8 @@ tasks:
     desc: Run task lint, task test, and gitleaks secret scan (pre-commit and GitHub Actions)
     cmds:
       - ./scripts/ci.sh {{.CLI_ARGS}}
+
+  eval:
+    desc: Run Promptfoo golden-dataset and red-team evals against local LiteLLM
+    cmds:
+      - ./scripts/eval.sh {{.CLI_ARGS}}

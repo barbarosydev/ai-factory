@@ -1,0 +1,20 @@
+description: "ai-factory PM Agent golden dataset & red-team evaluation against local LiteLLM"
+
+prompts:
+  - "{{issue_title}}\n{{issue_body}}"
+
+providers:
+  - id: file://providers/pm_provider.py
+    label: pm-agent (PydanticAI + gemma4:12b)
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://assertions/pm_contract.py:assert_pm_contract
+    - type: python
+      value: file://assertions/llm_judge.py:judge_output
+
+tests: file://datasets/golden_issues.yaml
+
+evaluateOptions:
+  maxConcurrency: 1

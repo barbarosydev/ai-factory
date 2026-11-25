@@ -28,7 +28,11 @@ flowchart TD
 
 ---
 
-## 2. LiteLLM Usage & Spend Correlation (`/ui/usage/` & `/ui/logs/`)
+## 2. Offline AI Evaluation & Red-Teaming (`task eval` + Promptfoo)
+
+`task eval` ([scripts/eval.sh](../scripts/eval.sh)) runs a 12-case golden dataset and prompt-injection red-team suite ([evals/promptfooconfig.yaml](../evals/promptfooconfig.yaml), [evals/datasets/golden_issues.yaml](../evals/datasets/golden_issues.yaml)) using the production [pm_system.md](../prompts/pm_system.md) prompt against local LiteLLM (`pm-agent` + `sec-agent` LLM-as-a-judge rubric) with Promptfoo telemetry disabled and `maxConcurrency: 1` ([ADR 0011](adr/0011-systematic-ai-evaluation-with-promptfoo.md)).
+
+## 3. LiteLLM Usage & Spend Correlation (`/ui/usage/` & `/ui/logs/`)
 
 Each Python agent activity attaches per-request correlation headers when calling LiteLLM:
 
