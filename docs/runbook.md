@@ -14,6 +14,7 @@
 | `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, `mypy`, policies, `actionlint`, doc checks |
 | `task test` | Go unit, Temporal workflow replay, Python agent, sandbox escape, and worktree tests |
 | `task ci` | Run `task lint`, `task test`, and `gitleaks` |
+| `task eval` | Run Promptfoo golden-dataset and red-team evals against local LiteLLM |
 
 ## Daily Startup
 

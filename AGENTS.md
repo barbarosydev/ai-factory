@@ -27,6 +27,7 @@ Use `task` for everything; logic lives in `scripts/`.
 | `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, `mypy`, policies, `actionlint`, doc checks |
 | `task test` | Go unit, Temporal workflow replay, Python `pytest`, sandbox escape, and worktree tests |
 | `task ci` | `task lint`, `task test`, and `gitleaks` |
+| `task eval` | Promptfoo 12-case golden dataset & red-team evaluation against local LiteLLM |
 
 ## Hard rules
 

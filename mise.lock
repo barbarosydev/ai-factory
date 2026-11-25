@@ -270,6 +270,15 @@ url = "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.
 url_api = "https://api.github.com/repos/jqlang/jq/releases/assets/453012788"
 provenance = "github-attestations"
 
+[[tools."npm:promptfoo"]]
+version = "0.126.0"
+aube = { path = ".mise/locks/npm-promptfoo/0.126.0", digest = "sha256:07e7e73a37ca255a1e75e6b81545356ff877d74b6920a53cc2626954de2c82ca" }
+backend = "npm:promptfoo"
+specifiers = ["0.126.0"]
+
+[tools."npm:promptfoo".provenance]
+repository = "github.com/promptfoo/promptfoo"
+
 [[tools.pre-commit]]
 version = "4.7.0"
 backend = "aqua:pre-commit/pre-commit"

@@ -4,7 +4,7 @@
 
 | Piece | File | Purpose |
 | --- | --- | --- |
-| Rules | [AGENTS.md](../AGENTS.md), [CLAUDE.md](../CLAUDE.md), `.claude/rules/` | Architecture, task commands, hard rules, and path-scoped conventions (`go.md` for the control plane, `python.md` for PydanticAI agents, `prompts.md`, `scripts.md`) |
+| Rules | [AGENTS.md](../AGENTS.md), [CLAUDE.md](../CLAUDE.md), `.claude/rules/` | Architecture, task commands, hard rules, and path-scoped conventions (`go.md` for the control plane, `python.md` for PydanticAI agents, `evals.md`, `prompts.md`, `scripts.md`) |
 | Permissions | [.claude/settings.json](../.claude/settings.json) | Allow, ask, and deny rules for tools and shell commands |
 | Hooks | `.claude/hooks/` | `keychain-kube-guard.py`, `branch-guard.sh`, `agent-guard.sh`, `secret-guard.sh`, `gofmt.sh`, `session-context.sh` |
 | Skills | `.claude/skills/` | `debug-workflow`, `upgrade-version`, `ship-pr` |
