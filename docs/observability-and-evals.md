@@ -101,3 +101,5 @@ Repair caps, wait timeouts, activity timeouts, worker concurrency, and OpenTelem
 | `FACTORY_OTEL_PROJECT_NAME` | `ai-factory` | Phoenix `openinference.project.name` resource attribute |
 | `FACTORY_OTEL_CAPTURE_CONTENT` | `false` | Metadata-only spans when `false`; set `true` locally to include prompts/completions/tool args |
 | `FACTORY_PHOENIX_URL` | `http://phoenix.localhost:8080` | Local Phoenix UI base URL probed by `task doctor` and referenced in PR summaries |
+| `FACTORY_SANDBOX_MODE` | `host` | Playwright execution sandbox mode (`host` or hardened `--network=none` `container`) |
+| `FACTORY_SANDBOX_IMAGE` | `mcr.microsoft.com/playwright:v1.52.0-noble` | Container image used when `FACTORY_SANDBOX_MODE=container` |

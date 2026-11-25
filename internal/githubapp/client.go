@@ -539,6 +539,9 @@ func (c *Client) formatPRBody(req activities.PRRequest) string {
 			fmt.Fprintf(&b, "- **OpenTelemetry Trace ID**: `%s`\n", req.TraceID)
 		}
 	}
+	if req.SandboxMode != "" {
+		fmt.Fprintf(&b, "- **Verification Sandbox**: `%s`\n", req.SandboxMode)
+	}
 	b.WriteString("\n")
 
 	b.WriteString("## Security & Reviewer Audit (`sec-agent`)\n\n")

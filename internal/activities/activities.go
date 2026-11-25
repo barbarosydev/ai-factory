@@ -3,6 +3,7 @@ package activities
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"go.temporal.io/sdk/activity"
@@ -39,6 +40,7 @@ type PRRequest struct {
 	RunID        string                         `json:"run_id,omitempty"`
 	TraceID      string                         `json:"trace_id,omitempty"`
 	PhoenixURL   string                         `json:"phoenix_url,omitempty"`
+	SandboxMode  string                         `json:"sandbox_mode,omitempty"`
 }
 
 // PRResult is returned after opening or updating a GitHub Pull Request.
@@ -121,7 +123,7 @@ type CleanupInput struct {
 // FactoryActivities implements all Temporal activities for IssueFactoryWorkflow.
 // Credentials remain encapsulated inside private client fields and never enter Temporal payloads.
 type FactoryActivities struct {
-	Git            *gitworktree.Manager
+	Git            gitworktree.TargetWorkspace
 	GitHub         IssueController
 	TracingEnabled bool
 	PhoenixUIURL   string
@@ -159,6 +161,10 @@ func (a *FactoryActivities) PublishPullRequestActivity(ctx context.Context, in P
 	if a.TracingEnabled && traceID != "" && strings.TrimSpace(a.PhoenixUIURL) != "" {
 		phoenixURL = strings.TrimRight(a.PhoenixUIURL, "/")
 	}
+	sandboxMode := strings.TrimSpace(strings.ToLower(os.Getenv("FACTORY_SANDBOX_MODE")))
+	if sandboxMode == "" {
+		sandboxMode = "host"
+	}
 	return a.GitHub.OpenPullRequest(ctx, PRRequest{
 		IssueNumber:  in.IssueNumber,
 		IssueTitle:   strings.TrimSpace(in.IssueTitle),
@@ -174,6 +180,7 @@ func (a *FactoryActivities) PublishPullRequestActivity(ctx context.Context, in P
 		RunID:        runID,
 		TraceID:      traceID,
 		PhoenixURL:   phoenixURL,
+		SandboxMode:  sandboxMode,
 	})
 }
 
