@@ -1,6 +1,15 @@
 # ai-factory
 
-A local-first, durable, asynchronous **AI Software Factory** built with **Go**, **Temporal**, **PydanticAI**, **LiteLLM**, **Ollama (`gemma4`)**, **Arize Phoenix**, **Promptfoo**, **Playwright + `@axe-core/playwright`**, and **GitHub Apps** — engineered to run reliably on a 36 GB Apple Silicon Mac with zero external LLM API keys.
+[![CI](https://github.com/barbarosydev/ai-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/barbarosydev/ai-factory/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Temporal](https://img.shields.io/badge/Temporal-1.32-111111?logo=temporal&logoColor=white)](internal/workflow/issue_workflow.go)
+[![PydanticAI](https://img.shields.io/badge/PydanticAI-Python_3.12-E92063)](agents_py/pyproject.toml)
+[![Arize Phoenix](https://img.shields.io/badge/Observability-Arize_Phoenix-FF6F00)](docs/observability-and-evals.md)
+[![Promptfoo](https://img.shields.io/badge/Evals-Promptfoo-7C3AED)](evals/promptfooconfig.yaml)
+[![Playwright](https://img.shields.io/badge/Gates-Playwright_%2B_axe--core-2EAD33)](docs/architecture.md)
+
+A local-first, durable, asynchronous **AI Software Factory** built with **Go**, **Temporal**, **PydanticAI**, **LiteLLM**, **Ollama (`gemma4`)**, **Arize Phoenix**, **Promptfoo**, **Playwright + `@axe-core/playwright`**, and **GitHub Apps** — engineered as a production-patterned multi-agent system running reliably on a 36 GB Apple Silicon Mac with zero external LLM API keys.
 
 Customer requests enter as structured GitHub Issues on [`barbarosydev/ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites), flow through four PydanticAI roles inside isolated git worktrees, verify desktop/mobile layout, zero-external-requests, and WCAG 2.1 AA accessibility across 9 Playwright gates (host or `--network=none` container sandbox), pause durably for human clarification when needed, and publish portfolio Pull Requests with inline screenshots and OpenTelemetry trace provenance.
 
@@ -18,6 +27,19 @@ flowchart LR
   SEC --> PR["Open PR + Screenshots + Trace ID -> review or auto-merge"]
 ```
 
+## Technology Stack & Architecture Matrix
+
+| Layer | Technologies | Role in the System |
+| --- | --- | --- |
+| **Control Plane** | Go 1.26, Temporal 1.32, `workflowcheck` | Deterministic `IssueFactoryWorkflow`, FIFO GitHub App poller, 7d HITL sleep, bounded 3-attempt repair loop |
+| **Agent Runtime** | Python 3.12, PydanticAI, OpenInference | `pm-agent` (`gemma4:12b`), `dev-agent`, `test-agent`, `sec-agent` (`gemma4:e4b`) with typed JSON contracts |
+| **Model Gateway** | LiteLLM 1.109.1, Ollama Metal GPU | Scoped virtual keys per role, reference token cost tracking (`/ui/usage/`), `x-litellm-trace-id` correlation |
+| **Observability** | Arize Phoenix 22.0.1, OpenTelemetry, Prometheus | Cross-language W3C `traceparent` spans (`FACTORY_OTEL_CAPTURE_CONTENT=false`), `/metrics`, `/healthz`, `/readyz` |
+| **Sandboxing & Security** | Git Worktrees, `SiteSandbox`, `SandboxRunner`, `clean_exec_env` | Zero LLM shell access, path-jailed file tools, optional `--network=none --cap-drop=ALL` container verification, Keychain PEM |
+| **Evals & Quality Gates** | Promptfoo, Playwright, `@axe-core/playwright` | 12-case golden & prompt-injection/XSS red-team evals (`task eval`), 9 deterministic DOM/layout/WCAG 2.1 AA site gates |
+| **Infrastructure (IaC)** | Terraform, Helm, k3d, CloudNativePG PostgreSQL 18 | 100% declarative local Kubernetes stack with write-only secrets and 9 `NetworkPolicy` isolation rules (`ai-factory-infra`) |
+| **Policy & Harness** | Conftest Rego, `gitleaks`, `golangci-lint`, `mypy`, `ruff`, `mise`, `Taskfile` | Automated architecture, security, secret-scan, and doc-drift guardrails in pre-commit and GitHub Actions |
+
 ## Engineering Highlights
 
 - **Durable Multi-Agent Orchestration**: Deterministic Temporal workflow ([issue_workflow.go](internal/workflow/issue_workflow.go), `go tool workflowcheck` clean) separating technical retries (`RetryPolicy`), 15s background heartbeats, durable 7-day human clarification sleeps (`SignalHumanReply`), and bounded 3-attempt semantic self-correction.
@@ -28,15 +50,27 @@ flowchart LR
 
 ## Live Observability & Durable Execution
 
-### End-to-End Trace Waterfall (Arize Phoenix + OpenInference)
+### 1. End-to-End Trace Waterfall (`Arize Phoenix + OpenInference`)
 Every issue run links one `OpenTelemetry Trace ID` from the generated GitHub PR directly to the connected Go Temporal + Python PydanticAI + Playwright span tree:
 
 ![Arize Phoenix end-to-end trace waterfall for factory-issue-26](docs/images/phoenix-trace-waterfall.png)
 
-### Durable Workflow History (Temporal Web UI)
-Completed `IssueFactoryWorkflow` executions, signal histories, and repair attempts are durably persisted in CloudNativePG PostgreSQL:
+### 2. Trace & Token Telemetry (`Arize Phoenix Traces`)
+Span kinds (`llm`, `tool`), latencies, and token usage are captured across all agent turns while keeping `FACTORY_OTEL_CAPTURE_CONTENT=false` by default:
+
+![Arize Phoenix ai-factory traces and token telemetry](docs/images/phoenix-traces-table.png)
+
+### 3. Activity Execution Timeline (`Temporal Web UI`)
+Each `IssueFactoryWorkflow` tracks every activity (`TransitionIssueStateActivity` -> `RunPMAgentActivity` -> `PrepareWorktreeActivity` -> `RunDeveloperAgentActivity` -> `RunTesterAgentActivity` -> `RunReviewerActivity` -> `PublishPullRequestActivity` -> `CleanupWorktreeActivity`) on a full Gantt timeline:
+
+![Temporal Web UI Gantt timeline for factory-issue-26](docs/images/temporal-workflow-timeline.png)
+
+### 4. Durable Workflow History (`Temporal Web UI`)
+Completed executions, signal histories, and bounded repair attempts are durably persisted in CloudNativePG PostgreSQL:
 
 ![Temporal Web UI completed IssueFactoryWorkflow runs](docs/images/temporal-workflows.png)
+
+> See **[`ai-factory-websites`](https://github.com/barbarosydev/ai-factory-websites#showcase-previews-1280x800-verified-evidence)** for rendered `1280x800` screenshots of the websites autonomously built and verified by this factory.
 
 ## Documentation
 
