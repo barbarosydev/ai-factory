@@ -1,0 +1,7 @@
+.git
+.worktrees
+bin/
+agents_py/.venv
+__pycache__/
+*.pyc
+.cache/

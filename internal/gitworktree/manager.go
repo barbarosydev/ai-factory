@@ -29,6 +29,16 @@ type DiffAudit struct {
 // TokenProvider supplies a short-lived GitHub App installation token for git push/fetch.
 type TokenProvider func(ctx context.Context) (string, error)
 
+// TargetWorkspace abstracts isolated git worktree lifecycle operations for factory activities.
+type TargetWorkspace interface {
+	PrepareWorktree(ctx context.Context, issueNumber int, siteSlug string) (string, error)
+	CommitAndPush(ctx context.Context, worktreeDir string, spec contracts.WebsiteSpecification, issueNumber int) (string, error)
+	CleanupWorktree(ctx context.Context, worktreeDir string, issueNumber int, siteSlug string, failed bool, reports []contracts.TestReport) error
+	ListExistingSites() ([]string, error)
+}
+
+var _ TargetWorkspace = (*Manager)(nil)
+
 // Manager manages isolated Git worktrees, site spec persistence, diff audits, and failed snapshots.
 type Manager struct {
 	repoPath     string

@@ -4,7 +4,7 @@
 
 In v1 ([ADR 0001](adr/0001-control-plane-language-and-temporal-topology.md)), `ai-factory-infra` runs inside k3d (Postgres, Temporal, LiteLLM) while the `ai-factory` Go worker runs directly on macOS so it can share the host Playwright Chromium cache, host `.worktrees/` checkouts, macOS Keychain, and native Apple Silicon Metal GPU without extra container mounts.
 
-At the same time, the Go control plane is already built cleanly for **in-cluster Kubernetes or Azure Kubernetes Service (AKS)** execution:
+The Go control plane and Python PydanticAI worker are packaged in the root multi-stage [Dockerfile](../Dockerfile) (compiling `factory` and installing `agents_py` via `uv sync --locked --no-dev` under non-root UID `10001` with `/healthz` `HEALTHCHECK`) and are ready for **in-cluster Kubernetes or Azure Kubernetes Service (AKS)** execution:
 - Stateless process driven by `FACTORY_*` environment variables
 - JSON structured logging (`FACTORY_LOG_FORMAT=json`)
 - Native HTTP `/healthz`, `/readyz`, and Prometheus `/metrics` endpoints (`FACTORY_METRICS_ADDR=:9091`)

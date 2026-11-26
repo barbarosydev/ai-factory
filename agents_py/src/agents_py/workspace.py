@@ -15,6 +15,7 @@ from typing import Any
 from opentelemetry import trace
 
 from agents_py.contracts import FailureEvidence, SingleCheck, WebsiteSpecification
+from agents_py.sandbox_runner import build_playwright_command, resolve_sandbox_config
 from agents_py.security import (
     SiteSandbox,
     check_site_structure,
@@ -157,14 +158,22 @@ async def run_playwright_suite(deps: WorkspaceDeps) -> dict[str, Any]:
             }
         )
 
+        sandbox_cfg = resolve_sandbox_config()
+        span.set_attribute("sandbox.mode", sandbox_cfg.mode)
+        argv, run_cwd, run_env = build_playwright_command(
+            cfg=sandbox_cfg,
+            websites_repo_path=deps.websites_repo_path,
+            worktree_dir=deps.worktree_dir,
+            site_slug=deps.spec.site_slug,
+            port=port,
+            clean_env=env,
+        )
+
         start = time.monotonic()
         proc = await asyncio.create_subprocess_exec(
-            "npx",
-            "playwright",
-            "test",
-            "--reporter=json",
-            cwd=deps.websites_repo_path,
-            env=env,
+            *argv,
+            cwd=run_cwd,
+            env=run_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
