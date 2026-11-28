@@ -12,6 +12,11 @@ tasks:
     cmds:
       - ./scripts/build.sh
 
+  build:local:
+    desc: "Build and verify a site locally with zero GitHub App setup (e.g. task build:local -- --prompt \"...\")"
+    cmds:
+      - ./scripts/build-local.sh {{.CLI_ARGS}}
+
   doctor:
     desc: Verify Go toolchain, ai-factory-infra connectivity, Keychain PEM, and ai-factory-websites readiness
     cmds:

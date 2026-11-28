@@ -1,6 +1,6 @@
 [project]
 name = "ai-factory-agents"
-version = "0.2.0"
+version = "0.3.0"
 description = "PydanticAI Temporal Activity Worker for the local-first AI Software Factory"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"

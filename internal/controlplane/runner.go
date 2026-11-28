@@ -10,6 +10,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -400,6 +401,8 @@ func ensureStartedOrSignaled(
 		"factory.issue",
 		trace.WithNewRoot(),
 		trace.WithAttributes(
+			attribute.String("openinference.span.kind", "CHAIN"),
+			attribute.String("session.id", wfID),
 			attribute.Int("factory.issue_number", issue.IssueNumber),
 			attribute.String("factory.request_type", issue.RequestType),
 			attribute.String("factory.autonomy_mode", string(opts.AutonomyMode)),
@@ -420,14 +423,18 @@ func ensureStartedOrSignaled(
 				UpdatedIssueBody: issue.IssueBody,
 			}
 			if sigErr := tc.SignalWorkflow(issueCtx, wfID, runID, workflow.SignalHumanReply, sig); sigErr != nil {
+				span.RecordError(sigErr)
+				span.SetStatus(codes.Error, sigErr.Error())
 				return "", fmt.Errorf("resume waiting workflow %s: %w", wfID, sigErr)
 			}
+			span.SetStatus(codes.Ok, "resumed paused workflow")
 			if logger != nil {
 				logger.Info("resumed paused workflow", "workflow_id", wfID, "run_id", runID, "issue", issue.IssueNumber, "trace_id", traceID)
 			}
 			_, _ = fmt.Fprintf(out, "resumed paused workflow %s (run=%s)\n", wfID, runID)
 			return runID, nil
 		}
+		span.SetStatus(codes.Ok, "attached to running workflow")
 		_, _ = fmt.Fprintf(out, "attached to running workflow %s (run=%s stage=%s)\n", wfID, runID, st.Stage)
 		return runID, nil
 	}
@@ -444,8 +451,11 @@ func ensureStartedOrSignaled(
 		AgentTaskQueue: cfg.AgentTaskQueue,
 	})
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", err
 	}
+	span.SetStatus(codes.Ok, "started workflow")
 	if logger != nil {
 		logger.Info("started workflow",
 			"workflow_id", wfID,

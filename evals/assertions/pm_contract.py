@@ -11,6 +11,9 @@ FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 FORBIDDEN_PATTERNS = (
     "<script",
     "javascript:",
+    "onerror=",
+    "onload=",
+    "onclick=",
     "http://",
     "https://",
     "LITELLM_PM_KEY",

@@ -8,6 +8,8 @@ from agents_py.security import (
     SiteSandbox,
     check_site_structure,
     clean_exec_env,
+    contrast_ratio,
+    ensure_accessible_primary,
     scan_external_urls,
     site_dir_for_worktree,
     wrap_untrusted_input,
@@ -190,3 +192,54 @@ def test_check_site_structure_enforces_charset_and_utf8_footer(tmp_path: pathlib
     )
     res_ok = check_site_structure(sb, spec)
     assert res_ok.passed, res_ok.errors
+
+
+def test_wcag_contrast_math_and_auto_adjustment() -> None:
+    assert contrast_ratio("#000000", "#FFFFFF") == pytest.approx(21.0, rel=1e-2)
+    assert contrast_ratio("#FFFFFF", "#FFFFFF") == pytest.approx(1.0, rel=1e-2)
+    # Sage #8A9A5B on off-white #FAF9F6 is below 4.5:1 -> must darken deterministically
+    assert contrast_ratio("#8A9A5B", "#FAF9F6") < 4.5
+    adjusted = ensure_accessible_primary("#8A9A5B", "#FAF9F6", min_ratio=4.5)
+    assert contrast_ratio(adjusted, "#FAF9F6") >= 4.5
+    # Already-accessible dark espresso on cream stays unchanged
+    assert ensure_accessible_primary("#2C1A12", "#FAF6F0", min_ratio=4.5) == "#2C1A12"
+
+
+def test_check_site_structure_catches_placeholders_dead_links_dup_ids_and_sticky_overflow(
+    tmp_path: pathlib.Path,
+) -> None:
+    sb = SiteSandbox(tmp_path / "site")
+    sb.write_file(
+        "index.html",
+        """<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title></head>
+<body>
+  <header><h1>Logo</h1><button>Menu</button><nav><a href="#hero">Hero</a><a href="#">Dead</a></nav></header>
+  <main>
+    <section id="hero"><h1>Kaffeekultur</h1><p>Kreuzberg</p><p>Map location placeholder</p></section>
+    <section id="menu"><h2 id="dup">Menu</h2></section>
+    <section id="hours"><h2 id="dup">Hours</h2></section>
+  </main>
+  <footer>Kaffeekultur Berlin</footer>
+</body>
+</html>""",
+    )
+    sb.write_file(
+        "styles.css",
+        "/* Existing styles.css content is preserved */\n"
+        ":root { --primary: #2C1A12; --bg: #FAF6F0; }\n"
+        "body { overflow-x: hidden; color: var(--primary); background: var(--bg); }\n"
+        ".site-header { position: sticky; top: 0; }\n"
+        "main { padding: 2rem; max-width: 72rem; margin: 0 auto; }\n",
+    )
+    res = check_site_structure(sb, _sample_spec())
+    assert not res.passed
+    joined = "\n".join(res.errors)
+    assert "exactly one <h1>" in joined
+    assert "duplicate element id" in joined
+    assert 'type="button"' in joined
+    assert "placeholder copy" in joined
+    assert "dead or empty link" in joined
+    assert "leaked LLM preservation" in joined
+    assert "overflow-x: hidden" in joined

@@ -5,6 +5,7 @@
 | Command | Use |
 | --- | --- |
 | `task build` | Build `./bin/factory` |
+| `task build:local` | Build and verify a site locally with zero GitHub App setup (`-- --prompt "..."`, `--spec-only`, `--preview`) |
 | `task doctor` | Verify local prerequisites, `ai-factory-infra`, Keychain PEM, and `ai-factory-websites` |
 | `task run` | Start worker + poller in `review` mode |
 | `task run:auto` | Start worker + poller in `auto` mode (checks + squash merge) |

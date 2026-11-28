@@ -1,10 +1,11 @@
-"""PydanticAI agents for PM, Developer, Tester, and Reviewer roles."""
+"""PydanticAI agents for PM, Developer, Tester (with Multimodal Visual QA), and Reviewer roles."""
 
 from __future__ import annotations
 
 import contextlib
 import difflib
 import json
+import logging
 import pathlib
 import re
 from collections.abc import Awaitable, Callable
@@ -13,9 +14,9 @@ from typing import Any
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, BinaryContent, ModelRetry, RunContext, ToolOutput, ToolReturn
 from pydantic_ai.capabilities import ProcessHistory
-from pydantic_ai.exceptions import UsageLimitExceeded
+from pydantic_ai.exceptions import ModelHTTPError, UsageLimitExceeded
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -44,7 +45,13 @@ from agents_py.contracts import (
     TestReport,
     TestRunInput,
 )
-from agents_py.security import inspect_dom_snapshot, scan_external_urls, wrap_untrusted_input
+from agents_py.security import (
+    ensure_accessible_primary,
+    inspect_dom_snapshot,
+    scan_external_urls,
+    wrap_untrusted_input,
+)
+from agents_py.telemetry import is_truthy_env
 from agents_py.workspace import (
     WorkspaceDeps,
     create_site_structure_result_dict,
@@ -53,10 +60,13 @@ from agents_py.workspace import (
     run_playwright_suite,
 )
 
+LOGGER = logging.getLogger("agents_py.agents")
+
 PROMPTS_DIR = pathlib.Path(__file__).resolve().parents[3] / "prompts"
 SLUG_CLEAN_RE = re.compile(r"[^a-z0-9-]+")
 MULTI_DASH_RE = re.compile(r"-+")
 HEX6_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+MAX_VISUAL_QA_IMAGE_BYTES = 2 * 1024 * 1024
 
 
 @dataclass
@@ -181,6 +191,9 @@ def _normalize_theme(raw_theme: dict[str, Any]) -> dict[str, str]:
     for key, fallback in defaults.items():
         if not HEX6_RE.match(theme.get(key, "")):
             theme[key] = fallback
+    theme["primary_color"] = ensure_accessible_primary(
+        theme["primary_color"], theme["background_color"], min_ratio=4.5
+    )
     if not theme.get("font_pairing", "").strip():
         theme["font_pairing"] = "Georgia, serif + system-ui, sans-serif"
     return theme
@@ -253,7 +266,7 @@ def normalize_pm_decision(
     issue: CustomerIssueInput,
     existing_spec: dict[str, Any] | None = None,
 ) -> PMDecisionOutput:
-    """Deterministically normalize slugs, defaults, colors, UTF-8 spelling, and navigation."""
+    """Deterministically normalize slugs, defaults, WCAG theme contrast, UTF-8 spelling, and navigation."""
     status = str(raw.get("status", "")).strip().lower()
     if status != "ready":
         return PMDecisionOutput.model_validate({**raw, "status": status})
@@ -409,6 +422,42 @@ PlaywrightRunner = Callable[[WorkspaceDeps], Awaitable[dict[str, Any]]]
 DiffInspector = Callable[[str, str], dict[str, Any]]
 
 
+def _write_site_bundle_output(
+    ctx: RunContext[WorkspaceDeps],
+    index_html: str = "",
+    styles_css: str = "",
+    script_js: str = "",
+    summary: str = "",
+) -> str:
+    """Write index.html, styles.css, and/or script.js, validate structure, and finish immediately when valid."""
+    ctx.deps.tool_trace.append("write_site_bundle")
+    sb = ctx.deps.sandbox()
+    spec_vocab = _extract_non_ascii_vocab(ctx.deps.spec.model_dump_json())
+    written: list[str] = []
+    for rel, content in (
+        ("index.html", _repair_garbled_utf8(index_html, spec_vocab)),
+        ("styles.css", styles_css),
+        ("script.js", script_js),
+    ):
+        if content.strip():
+            sb.write_file(rel, content)
+            ctx.deps.changed_files.add(rel)
+            written.append(rel)
+    check = create_site_structure_result_dict(ctx.deps)
+    if not check["passed"]:
+        raise ModelRetry(
+            json.dumps(
+                {
+                    "status": "needs_fixes",
+                    "files_written": written,
+                    "structure_check": check,
+                },
+                ensure_ascii=False,
+            )
+        )
+    return summary.strip() or f"Implemented site {ctx.deps.spec.site_slug} ({', '.join(written)})."
+
+
 def _register_developer_tools(dev_agent: Agent[WorkspaceDeps, str]) -> None:
     @dev_agent.tool
     def read_template(ctx: RunContext[WorkspaceDeps]) -> dict[str, str]:
@@ -429,36 +478,6 @@ def _register_developer_tools(dev_agent: Agent[WorkspaceDeps, str]) -> None:
         return ctx.deps.sandbox().read_file(path)
 
     @dev_agent.tool
-    def write_site_bundle(
-        ctx: RunContext[WorkspaceDeps],
-        index_html: str = "",
-        styles_css: str = "",
-        script_js: str = "",
-        summary: str = "",
-    ) -> dict[str, Any]:
-        """Write index.html, styles.css, and/or script.js and validate site structure."""
-        ctx.deps.tool_trace.append("write_site_bundle")
-        sb = ctx.deps.sandbox()
-        spec_vocab = _extract_non_ascii_vocab(ctx.deps.spec.model_dump_json())
-        written: list[str] = []
-        for rel, content in (
-            ("index.html", _repair_garbled_utf8(index_html, spec_vocab)),
-            ("styles.css", styles_css),
-            ("script.js", script_js),
-        ):
-            if content.strip():
-                sb.write_file(rel, content)
-                ctx.deps.changed_files.add(rel)
-                written.append(rel)
-        check = create_site_structure_result_dict(ctx.deps)
-        return {
-            "status": "completed" if check["passed"] else "needs_fixes",
-            "files_written": written,
-            "structure_check": check,
-            "summary": summary,
-        }
-
-    @dev_agent.tool
     def write_file(ctx: RunContext[WorkspaceDeps], path: str, content: str) -> dict[str, Any]:
         """Create or overwrite a static web file inside sites/<site_slug>/."""
         ctx.deps.tool_trace.append(f"write_file:{path}")
@@ -469,7 +488,7 @@ def _register_developer_tools(dev_agent: Agent[WorkspaceDeps, str]) -> None:
         ctx.deps.changed_files.add(path.lstrip("./"))
         return {"status": "written", "path": path, "bytes": n}
 
-    @dev_agent.tool
+    @dev_agent.tool(name="check_site_structure")
     def check_site_structure_tool(ctx: RunContext[WorkspaceDeps]) -> dict[str, Any]:
         """Validate HTML5 semantics, section IDs, keywords, local assets, and anti-prompt-leak."""
         ctx.deps.tool_trace.append("check_site_structure")
@@ -482,7 +501,7 @@ async def run_developer_agent(
     websites_repo_path: str,
     model: Model,
 ) -> ImplementationResult:
-    """Execute the PydanticAI Developer Agent with sandboxed site tools."""
+    """Execute the PydanticAI Developer Agent with single-turn ToolOutput write_site_bundle."""
     deps = WorkspaceDeps(
         worktree_dir=worktree_dir,
         websites_repo_path=websites_repo_path,
@@ -492,6 +511,18 @@ async def run_developer_agent(
     dev_agent: Agent[WorkspaceDeps, str] = Agent(
         model=model,
         deps_type=WorkspaceDeps,
+        output_type=[
+            ToolOutput(
+                _write_site_bundle_output,
+                name="write_site_bundle",
+                description=(
+                    "Write complete index.html, styles.css, and/or script.js in one call. "
+                    "Validates structure automatically and finishes immediately when all checks pass."
+                ),
+                max_retries=4,
+            ),
+            str,
+        ],
         system_prompt=_load_prompt("dev_system.md"),
         model_settings=ModelSettings(temperature=0.1, max_tokens=8192),
         capabilities=[ProcessHistory(compact_tool_history)],
@@ -546,7 +577,31 @@ class _TesterVerdict(BaseModel):
 
 @dataclass
 class _TesterDeps(WorkspaceDeps):
+    visual_qa_enabled: bool = True
+    visual_qa_attached: bool = False
     submitted: _TesterVerdict | None = None
+
+
+def _load_visual_qa_images(deps: _TesterDeps, pw_res: dict[str, Any]) -> list[BinaryContent]:
+    """Read freshly captured desktop/mobile PNG screenshots inside the worktree for Gemma 4 Visual QA."""
+    if not deps.visual_qa_enabled:
+        return []
+    images: list[BinaryContent] = []
+    wt_root = pathlib.Path(deps.worktree_dir).resolve()
+    for key in ("desktop_screenshot_path", "mobile_screenshot_path"):
+        rel = str(pw_res.get(key) or "").strip()
+        if not rel:
+            continue
+        candidate = (wt_root / rel).resolve()
+        if wt_root not in candidate.parents or not candidate.is_file():
+            continue
+        try:
+            data = candidate.read_bytes()
+        except OSError:
+            continue
+        if 0 < len(data) <= MAX_VISUAL_QA_IMAGE_BYTES:
+            images.append(BinaryContent(data=data, media_type="image/png"))
+    return images
 
 
 def _merge_failures(
@@ -575,20 +630,41 @@ def _merge_failures(
 def _register_tester_tools(
     tester_agent: Agent[_TesterDeps, str], pw_runner: PlaywrightRunner
 ) -> None:
-    @tester_agent.tool
-    async def run_playwright_suite_tool(ctx: RunContext[_TesterDeps]) -> dict[str, Any]:
-        """Execute all Playwright gates across desktop and mobile viewports."""
+    @tester_agent.tool(name="run_playwright_suite")
+    async def run_playwright_suite_tool(
+        ctx: RunContext[_TesterDeps],
+    ) -> ToolReturn | dict[str, Any]:
+        """Execute all Playwright + WCAG gates across desktop and mobile viewports and attach rendered screenshots."""
         res = await pw_runner(ctx.deps)
         ctx.deps.last_pw_result = res
         snap = inspect_dom_snapshot(ctx.deps.sandbox())
-        return {**res, "dom_snapshot": snap}
+        images = _load_visual_qa_images(ctx.deps, res)
+        payload: dict[str, Any] = {
+            **res,
+            "dom_snapshot": snap,
+            "visual_qa_images_attached": len(images),
+        }
+        if images:
+            ctx.deps.visual_qa_attached = True
+            return ToolReturn(
+                return_value=payload,
+                content=[
+                    (
+                        "Rendered desktop (1280x800) and mobile (375x812) screenshots are attached. "
+                        "Visually inspect them for invisible/low-contrast text, overlapping elements, "
+                        "grey placeholder boxes, or broken layout before calling submit_test_report."
+                    ),
+                    *images,
+                ],
+            )
+        return payload
 
-    @tester_agent.tool
+    @tester_agent.tool(name="inspect_dom_snapshot")
     def inspect_dom_snapshot_tool(ctx: RunContext[_TesterDeps]) -> str:
         """Inspect rendered HTML landmarks, headings, and anchors."""
         return inspect_dom_snapshot(ctx.deps.sandbox())
 
-    @tester_agent.tool
+    @tester_agent.tool(name="read_site_file")
     def read_site_file_tool(ctx: RunContext[_TesterDeps], path: str) -> str:
         """Read a generated site file inside sites/<site_slug>/."""
         return ctx.deps.sandbox().read_file(path)
@@ -602,7 +678,7 @@ def _register_tester_tools(
     ) -> dict[str, str]:
         """Submit the final verification verdict after running Playwright."""
         if ctx.deps.last_pw_result is None:
-            return {"status": "rejected", "error": "run_playwright_suite_tool must be called first"}
+            return {"status": "rejected", "error": "run_playwright_suite must be called first"}
         ctx.deps.submitted = _TesterVerdict(
             semantic_quality_ok=semantic_quality_ok,
             tester_summary=tester_summary,
@@ -617,12 +693,16 @@ async def run_tester_agent(
     websites_repo_path: str,
     model: Model,
     playwright_runner: PlaywrightRunner = run_playwright_suite,
+    *,
+    visual_qa: bool | None = None,
 ) -> TestReport:
-    """Execute Playwright verification and fail-closed PydanticAI semantic QA."""
+    """Execute Playwright verification and fail-closed PydanticAI semantic + Multimodal Visual QA."""
+    enable_visual = is_truthy_env("FACTORY_VISUAL_QA", True) if visual_qa is None else visual_qa
     deps = _TesterDeps(
         worktree_dir=worktree_dir,
         websites_repo_path=websites_repo_path,
         spec=test_input.spec,
+        visual_qa_enabled=enable_visual,
     )
 
     tester_agent: Agent[_TesterDeps, str] = Agent(
@@ -634,13 +714,33 @@ async def run_tester_agent(
     )
     _register_tester_tools(tester_agent, playwright_runner)
 
-    with contextlib.suppress(UsageLimitExceeded):
-        await tester_agent.run(
-            "Verify the website for TestRunInput:\n\n"
-            + wrap_untrusted_input("test_input", test_input.model_dump_json(indent=2)),
-            deps=deps,
-            usage_limits=UsageLimits(request_limit=8),
-        )
+    prompt = "Verify the website for TestRunInput:\n\n" + wrap_untrusted_input(
+        "test_input", test_input.model_dump_json(indent=2)
+    )
+    try:
+        with contextlib.suppress(UsageLimitExceeded):
+            await tester_agent.run(
+                prompt,
+                deps=deps,
+                usage_limits=UsageLimits(request_limit=8),
+            )
+    except ModelHTTPError as exc:
+        if deps.visual_qa_attached and exc.status_code in (400, 415, 422):
+            LOGGER.warning(
+                "multimodal visual QA rejected by model endpoint (HTTP %d); falling back to text-only QA",
+                exc.status_code,
+            )
+            deps.visual_qa_enabled = False
+            deps.visual_qa_attached = False
+            deps.submitted = None
+            with contextlib.suppress(UsageLimitExceeded):
+                await tester_agent.run(
+                    prompt,
+                    deps=deps,
+                    usage_limits=UsageLimits(request_limit=8),
+                )
+        else:
+            raise
 
     if deps.last_pw_result is None:
         deps.last_pw_result = await playwright_runner(deps)
@@ -713,12 +813,12 @@ class _ReviewerDeps(WorkspaceDeps):
 
 
 def _register_reviewer_tools(reviewer_agent: Agent[_ReviewerDeps, str]) -> None:
-    @reviewer_agent.tool
+    @reviewer_agent.tool(name="inspect_git_diff")
     def inspect_git_diff_tool(ctx: RunContext[_ReviewerDeps]) -> dict[str, Any]:
         """Return pre-verified git diff isolation facts."""
         return ctx.deps.diff_audit
 
-    @reviewer_agent.tool
+    @reviewer_agent.tool(name="scan_external_urls")
     def scan_external_urls_tool(ctx: RunContext[_ReviewerDeps]) -> dict[str, Any]:
         """Return external URL scan facts."""
         return {
@@ -726,7 +826,7 @@ def _register_reviewer_tools(reviewer_agent: Agent[_ReviewerDeps, str]) -> None:
             "external_assets_ok": len(ctx.deps.external_urls) == 0,
         }
 
-    @reviewer_agent.tool
+    @reviewer_agent.tool(name="read_site_file")
     def read_site_file_tool(ctx: RunContext[_ReviewerDeps], path: str) -> str:
         """Read a generated file inside sites/<site_slug>/."""
         return ctx.deps.sandbox().read_file(path)

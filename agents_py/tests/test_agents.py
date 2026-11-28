@@ -194,8 +194,65 @@ async def test_developer_agent_write_site_bundle(tmp_path: pathlib.Path) -> None
         str(repo),
         FunctionModel(_dev_model),
     )
+    assert call_count == 1  # ToolOutput finishes immediately without an extra post-write LLM turn
     assert res.files_changed == ["index.html", "styles.css"]
     assert "write_site_bundle" in res.tool_trace
+
+
+async def test_developer_agent_retries_on_structure_error_and_recovers(
+    tmp_path: pathlib.Path,
+) -> None:
+    wt = tmp_path / "wt"
+    repo = tmp_path / "repo"
+    (repo / "sites" / "_template").mkdir(parents=True)
+    call_count = 0
+
+    def _dev_retry_model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            bad_args = json.dumps(
+                {
+                    "index_html": "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><main><section id='hero'><h1>Kaffeekultur</h1><p>Map location placeholder</p></section></main></body></html>",
+                    "styles_css": "body { color: #2C1A12; background: #FAF6F0; }",
+                }
+            )
+            return ModelResponse(parts=[ToolCallPart(tool_name="write_site_bundle", args=bad_args)])
+        good_html = """<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Kaffeekultur</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+  <header><nav><a href="#menu">Menu</a></nav></header>
+  <main>
+    <section id="hero"><h1>Kaffeekultur</h1><p>Freshly roasted in Kreuzberg.</p></section>
+    <section id="menu"><h2>Menu</h2><p>Single-origin Espresso daily.</p></section>
+    <section id="hours"><h2>Hours</h2><p>Mon-Fri 08:00-18:00</p></section>
+  </main>
+  <footer>Kaffeekultur Berlin</footer>
+</body>
+</html>"""
+        good_args = json.dumps(
+            {
+                "index_html": good_html,
+                "styles_css": (
+                    ":root { --primary: #2C1A12; --bg: #FAF6F0; } "
+                    "body { margin: 0; font-family: system-ui, sans-serif; color: var(--primary); background: var(--bg); } "
+                    "header, main, footer { padding: 1.5rem; max-width: 72rem; margin: 0 auto; } "
+                    "nav a { color: var(--primary); margin-right: 1rem; }"
+                ),
+                "summary": "Fixed placeholder and missing landmarks",
+            }
+        )
+        return ModelResponse(parts=[ToolCallPart(tool_name="write_site_bundle", args=good_args)])
+
+    res = await run_developer_agent(
+        str(wt),
+        DeveloperTaskInput(issue_number=9, attempt=1, spec=_sample_spec()),
+        str(repo),
+        FunctionModel(_dev_retry_model),
+    )
+    assert call_count == 2
+    assert "Fixed placeholder" in res.summary
 
 
 def test_compact_tool_history_trims_old_writes() -> None:
@@ -390,9 +447,7 @@ async def test_tester_agent_passes_and_fails_closed_with_injected_runner(
         )
         step += 1
         if step == 1:
-            return ModelResponse(
-                parts=[ToolCallPart(tool_name="run_playwright_suite_tool", args="{}")]
-            )
+            return ModelResponse(parts=[ToolCallPart(tool_name="run_playwright_suite", args="{}")])
         if step == 2:
             args = json.dumps(
                 {
@@ -414,6 +469,56 @@ async def test_tester_agent_passes_and_fails_closed_with_injected_runner(
     assert report.passed
     assert report.semantic_quality_ok
     assert report.duration_ms == 42
+
+    # Verify Multimodal Visual QA attaches BinaryContent screenshots when PNGs exist
+    ev_dir = site_dir / "evidence"
+    ev_dir.mkdir(parents=True, exist_ok=True)
+    png_stub = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    (ev_dir / "desktop.png").write_bytes(png_stub)
+    (ev_dir / "mobile.png").write_bytes(png_stub)
+
+    saw_binary_image = False
+    vstep = 0
+
+    def _tester_visual(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        nonlocal saw_binary_image, vstep
+        vstep += 1
+        if vstep == 1:
+            return ModelResponse(parts=[ToolCallPart(tool_name="run_playwright_suite", args="{}")])
+        for msg in messages:
+            for part in msg.parts:
+                content = getattr(part, "content", None)
+                if isinstance(content, list) and any(
+                    getattr(item, "media_type", "") == "image/png" for item in content
+                ):
+                    saw_binary_image = True
+        if vstep == 2:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="submit_test_report",
+                        args=json.dumps(
+                            {
+                                "semantic_quality_ok": True,
+                                "tester_summary": "Visual QA and 11 Playwright gates clean.",
+                                "failures": [],
+                            }
+                        ),
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart("Done.")])
+
+    visual_report = await run_tester_agent(
+        str(wt),
+        TestRunInput(issue_number=8, attempt=1, spec=_sample_spec()),
+        str(tmp_path),
+        FunctionModel(_tester_visual),
+        playwright_runner=_passing_pw,
+        visual_qa=True,
+    )
+    assert visual_report.passed
+    assert saw_binary_image
 
     # Fail-closed when LLM omits submit_test_report
     def _tester_forgot_submit(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
