@@ -33,7 +33,7 @@ flowchart LR
   subgraph TARGET["ai-factory-websites (Target Monorepo)"]
     ISSUES["GitHub Issues & factory:* Labels"]
     WT[".worktrees/issue-N/sites/<slug>/ (SiteSandbox)"]
-    PW["Root @playwright/test Suite (8 gates)"]
+    PW["Root @playwright/test Suite (11 gates)"]
     PRS["PRs + ?raw=true Screenshots + CI"]
     POLLER <-->|GitHub App JWT + Token| ISSUES
     PYWORKER --> WT
@@ -77,4 +77,4 @@ stateDiagram-v2
 - **[Observability, Configurability & Agent Evals](observability-and-evals.md)** — Arize Phoenix OpenInference tracing, LiteLLM `/ui/usage/` correlation, Prometheus `/metrics`, `/healthz`, `/readyz`, structured `slog` JSON logs, and tunable `FACTORY_*` variables.
 - **Tracing** — W3C `traceparent` propagates from Go through Temporal `_tracer-data` headers into Python PydanticAI + Playwright spans (`FACTORY_OTEL_CAPTURE_CONTENT=false` metadata-only by default), with `Trace ID` recorded on generated PRs ([ADR 0010](adr/0010-opentelemetry-and-phoenix-observability.md)).
 - **[Running in Kubernetes / Migrating to AKS](deployment-k8s-aks.md)** — How the stateless Go worker, `/readyz` probes, and `FACTORY_MAX_CONCURRENT_ACTIVITIES` transition cleanly from local macOS host execution to AKS Pods.
-- **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0010`.
+- **[Architecture Decision Records](adr/README.md)** — ADRs `0001`–`0012`.

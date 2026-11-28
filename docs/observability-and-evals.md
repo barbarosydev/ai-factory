@@ -30,7 +30,7 @@ flowchart TD
 
 ## 2. Offline AI Evaluation & Red-Teaming (`task eval` + Promptfoo)
 
-`task eval` ([scripts/eval.sh](../scripts/eval.sh)) runs a 12-case golden dataset and prompt-injection red-team suite ([evals/promptfooconfig.yaml](../evals/promptfooconfig.yaml), [evals/datasets/golden_issues.yaml](../evals/datasets/golden_issues.yaml)) using the production [pm_system.md](../prompts/pm_system.md) prompt against local LiteLLM (`pm-agent` + `sec-agent` LLM-as-a-judge rubric) with Promptfoo telemetry disabled and `maxConcurrency: 1` ([ADR 0011](adr/0011-systematic-ai-evaluation-with-promptfoo.md)).
+`task eval` ([scripts/eval.sh](../scripts/eval.sh)) runs a 16-case golden dataset and prompt-injection red-team suite ([evals/promptfooconfig.yaml](../evals/promptfooconfig.yaml), [evals/datasets/golden_issues.yaml](../evals/datasets/golden_issues.yaml)) using the production [pm_system.md](../prompts/pm_system.md) prompt against local LiteLLM (`pm-agent` + `sec-agent` LLM-as-a-judge rubric) with Promptfoo telemetry disabled and `maxConcurrency: 1` ([ADR 0011](adr/0011-systematic-ai-evaluation-with-promptfoo.md)).
 
 ## 3. LiteLLM Usage & Spend Correlation (`/ui/usage/` & `/ui/logs/`)
 
@@ -57,7 +57,7 @@ ORDER BY calls DESC;
 
 ---
 
-## 3. Runtime Probes & Prometheus `/metrics`
+## 4. Runtime Probes & Prometheus `/metrics`
 
 When `ai-factory run` or `ai-factory once` starts, a loopback HTTP server runs on `FACTORY_METRICS_ADDR` (default `127.0.0.1:9091`; set `off` to disable):
 
@@ -78,7 +78,7 @@ Enable structured JSON logs (`log/slog`) with `trace_id` correlation by setting 
 
 ---
 
-## 4. Configurable Policy & Runtime Environment Variables
+## 5. Configurable Policy & Runtime Environment Variables
 
 Repair caps, wait timeouts, activity timeouts, worker concurrency, and OpenTelemetry settings are configurable via environment variables ([internal/config/config.go](../internal/config/config.go) and [agents_py/src/agents_py/telemetry.py](../agents_py/src/agents_py/telemetry.py)):
 
@@ -103,3 +103,4 @@ Repair caps, wait timeouts, activity timeouts, worker concurrency, and OpenTelem
 | `FACTORY_PHOENIX_URL` | `http://phoenix.localhost:8080` | Local Phoenix UI base URL probed by `task doctor` and referenced in PR summaries |
 | `FACTORY_SANDBOX_MODE` | `host` | Playwright execution sandbox mode (`host` or hardened `--network=none` `container`) |
 | `FACTORY_SANDBOX_IMAGE` | `mcr.microsoft.com/playwright:v1.52.0-noble` | Container image used when `FACTORY_SANDBOX_MODE=container` |
+| `FACTORY_VISUAL_QA` | `true` | Attach rendered desktop & mobile PNG screenshots to `test-agent` for Gemma 4 Multimodal Visual QA (`false` for DOM-only) |

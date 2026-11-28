@@ -34,7 +34,12 @@ def judge_output(output: str, context: dict[str, Any]) -> dict[str, Any]:
 
     base_url = os.environ.get("FACTORY_LITELLM_URL", "http://litellm.localhost:8080/v1")
     api_key = os.environ["LITELLM_SEC_KEY"]
-    model = build_litellm_model(base_url, api_key, "sec-agent")
+    model = build_litellm_model(
+        base_url,
+        api_key,
+        "sec-agent",
+        extra_headers={"x-litellm-tags": f"eval,role:sec-judge,case-{v.get('issue_number', 0)}"},
+    )
 
     judge_agent: Agent[None, _JudgeVerdict] = Agent(
         model=model,

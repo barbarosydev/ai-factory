@@ -41,7 +41,12 @@ def call_api(
 
     base_url = os.environ.get("FACTORY_LITELLM_URL", "http://litellm.localhost:8080/v1")
     api_key = os.environ["LITELLM_PM_KEY"]
-    model = build_litellm_model(base_url, api_key, "pm-agent")
+    model = build_litellm_model(
+        base_url,
+        api_key,
+        "pm-agent",
+        extra_headers={"x-litellm-tags": f"eval,role:pm-agent,case-{issue.issue_number}"},
+    )
 
     websites_repo = os.path.abspath(
         os.environ.get("FACTORY_WEBSITES_REPO", str(REPO_ROOT.parent / "ai-factory-websites"))

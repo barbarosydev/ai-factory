@@ -1,4 +1,4 @@
-"""Path-jailed filesystem sandbox, subprocess env scrubbing, and static security checks."""
+"""Path-jailed filesystem sandbox, subprocess env scrubbing, WCAG contrast math, and static security checks."""
 
 from __future__ import annotations
 
@@ -20,6 +20,72 @@ EXTERNAL_ATTR_URL_RE = re.compile(
 EXTERNAL_CSS_URL_RE = re.compile(
     r"""(?i)(?:url\(\s*['"]?|@import\s+['"]?)(https?://[^'"\)\s;]+|//[^'"\)\s;]+)"""
 )
+HEX6_COLOR_RE = re.compile(r"^#([0-9A-Fa-f]{6})$")
+PLACEHOLDER_TEXT_RE = re.compile(
+    r"(?i)(?:map location placeholder|lorem ipsum|dolor sit amet|placeholder (?:text|image|map|content))|\b(?:TODO|TBD|FIXME)\b"
+)
+LEAKED_CSS_COMMENT_RE = re.compile(r"(?i)existing\s+styles\.css\s+content\s+is\s+preserved")
+OVERFLOW_X_HIDDEN_ROOT_RE = re.compile(
+    r"(?is)(?:^|[},;\s])(?:html|body)(?:\s*,\s*(?:html|body))*\s*\{[^}]*overflow-x\s*:\s*hidden"
+)
+STICKY_POSITION_RE = re.compile(r"(?i)position\s*:\s*sticky")
+
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    m = HEX6_COLOR_RE.match(hex_color.strip())
+    if not m:
+        raise ValueError(f"invalid 6-digit hex color: {hex_color!r}")
+    raw = m.group(1)
+    return int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+
+
+def relative_luminance(hex_color: str) -> float:
+    """Compute WCAG 2.1 relative luminance for a 6-digit sRGB hex color."""
+
+    def _chan(v: int) -> float:
+        s = v / 255.0
+        return s / 12.92 if s <= 0.04045 else float(((s + 0.055) / 1.055) ** 2.4)
+
+    r, g, b = _hex_to_rgb(hex_color)
+    return 0.2126 * _chan(r) + 0.7152 * _chan(g) + 0.0722 * _chan(b)
+
+
+def contrast_ratio(hex_a: str, hex_b: str) -> float:
+    """Compute WCAG 2.1 contrast ratio (1.0 to 21.0) between two 6-digit hex colors."""
+    la = relative_luminance(hex_a)
+    lb = relative_luminance(hex_b)
+    lighter, darker = (la, lb) if la >= lb else (lb, la)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def ensure_accessible_primary(
+    primary_color: str,
+    background_color: str,
+    min_ratio: float = 4.5,
+) -> str:
+    """Adjust primary_color brightness deterministically if its contrast against background_color < min_ratio."""
+    if not HEX6_COLOR_RE.match(primary_color) or not HEX6_COLOR_RE.match(background_color):
+        return primary_color
+    if contrast_ratio(primary_color, background_color) >= min_ratio:
+        return primary_color
+
+    bg_lum = relative_luminance(background_color)
+    r, g, b = _hex_to_rgb(primary_color)
+    darken = bg_lum >= 0.45
+    for step in range(1, 21):
+        factor = step / 20.0
+        if darken:
+            nr = max(0, round(r * (1.0 - factor)))
+            ng = max(0, round(g * (1.0 - factor)))
+            nb = max(0, round(b * (1.0 - factor)))
+        else:
+            nr = min(255, round(r + (255 - r) * factor))
+            ng = min(255, round(g + (255 - g) * factor))
+            nb = min(255, round(b + (255 - b) * factor))
+        candidate = f"#{nr:02X}{ng:02X}{nb:02X}"
+        if contrast_ratio(candidate, background_color) >= min_ratio:
+            return candidate
+    return "#1A1A1A" if darken else "#FFFFFF"
 
 
 def wrap_untrusted_input(label: str, payload: str) -> str:
@@ -148,7 +214,11 @@ class _DOMInspector(HTMLParser):
         self.has_footer = False
         self.title = ""
         self.footer_text_parts: list[str] = []
+        self.body_text_parts: list[str] = []
         self.ids: set[str] = set()
+        self.duplicate_ids: list[str] = []
+        self.h1_count = 0
+        self.buttons_missing_type = 0
         self.id_text: dict[str, list[str]] = {}
         self.anchors: list[str] = []
         self.asset_refs: list[tuple[str, str]] = []
@@ -156,6 +226,7 @@ class _DOMInspector(HTMLParser):
         self._stack: list[tuple[str, str]] = []
         self._in_title = False
         self._in_heading = False
+        self._in_script_or_style = False
         self._cur_heading: list[str] = []
 
     def handle_decl(self, decl: str) -> None:
@@ -167,6 +238,8 @@ class _DOMInspector(HTMLParser):
         attr_map = {k.lower(): (v or "") for k, v in attrs}
         el_id = attr_map.get("id", "")
         if el_id:
+            if el_id in self.ids:
+                self.duplicate_ids.append(el_id)
             self.ids.add(el_id)
             self.id_text.setdefault(el_id, [])
         self._stack.append((t, el_id))
@@ -179,7 +252,13 @@ class _DOMInspector(HTMLParser):
             self.has_footer = True
         elif t == "title":
             self._in_title = True
+        elif t in ("script", "style"):
+            self._in_script_or_style = True
+        elif t == "button" and not attr_map.get("type", "").strip():
+            self.buttons_missing_type += 1
         elif t in ("h1", "h2", "h3"):
+            if t == "h1":
+                self.h1_count += 1
             self._in_heading = True
             self._cur_heading = []
         elif t == "meta":
@@ -195,8 +274,7 @@ class _DOMInspector(HTMLParser):
                 self.has_viewport = True
         elif t == "a":
             href = attr_map.get("href", "")
-            if href:
-                self.anchors.append(href)
+            self.anchors.append(href)
         elif t == "link":
             if href := attr_map.get("href", ""):
                 self.asset_refs.append(("link href", href))
@@ -209,6 +287,8 @@ class _DOMInspector(HTMLParser):
         t = tag.lower()
         if t == "title":
             self._in_title = False
+        elif t in ("script", "style"):
+            self._in_script_or_style = False
         elif t in ("h1", "h2", "h3") and self._in_heading:
             self._in_heading = False
             heading = "".join(self._cur_heading).strip()
@@ -224,6 +304,8 @@ class _DOMInspector(HTMLParser):
             self.title += data
         if self._in_heading:
             self._cur_heading.append(data)
+        if not self._in_script_or_style:
+            self.body_text_parts.append(data)
         for tag, el_id in self._stack:
             if tag == "footer":
                 self.footer_text_parts.append(data)
@@ -238,7 +320,7 @@ class StructureCheckResult:
 
 
 def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> StructureCheckResult:
-    """Validate HTML5 landmarks, section IDs, keywords, local assets, and anti-prompt-leak."""
+    """Validate HTML5 landmarks, semantics, links, theme colors, local assets, and anti-prompt-leak."""
     errors: list[str] = []
     try:
         raw_html = sandbox.read_file("index.html")
@@ -257,10 +339,19 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
             errors.append(
                 "styles.css contains an external http(s):// url(...); remove external URLs"
             )
+        if LEAKED_CSS_COMMENT_RE.search(css):
+            errors.append(
+                "styles.css contains a leaked LLM preservation placeholder comment; write clean CSS"
+            )
         if len(css.strip()) < 200 or css.count("{") < 3:
             errors.append(
                 "styles.css is missing or too minimal (<200 bytes or <3 CSS rules); "
                 "preserve existing CSS or write full responsive rules"
+            )
+        if STICKY_POSITION_RE.search(css) and OVERFLOW_X_HIDDEN_ROOT_RE.search(css):
+            errors.append(
+                "styles.css sets overflow-x: hidden on html/body alongside position: sticky; "
+                "remove overflow-x: hidden so sticky headers work and layouts stay genuinely responsive"
             )
         css_lower = css.lower()
         for label, color in (
@@ -299,6 +390,21 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
         if expected_footer not in actual_footer:
             errors.append(f"<footer> must include exact spec.footer_text {spec.footer_text!r}")
 
+    if parser.h1_count != 1:
+        errors.append(f"index.html must contain exactly one <h1> (found {parser.h1_count})")
+    if parser.duplicate_ids:
+        errors.append(
+            f"index.html contains duplicate element id(s): {sorted(set(parser.duplicate_ids))}"
+        )
+    if parser.buttons_missing_type > 0:
+        errors.append('all <button> elements must include an explicit type="button" attribute')
+
+    visible_body = " ".join(" ".join(parser.body_text_parts).split())
+    if m := PLACEHOLDER_TEXT_RE.search(visible_body):
+        errors.append(
+            f"index.html contains placeholder copy ({m.group(0)!r}); replace with authentic domain content or inline SVG"
+        )
+
     for kind, ref in parser.asset_refs:
         lower = ref.strip().lower()
         if lower.startswith(("http://", "https://", "//")):
@@ -313,8 +419,15 @@ def check_site_structure(sandbox: SiteSandbox, spec: WebsiteSpecification) -> St
                 errors.append(f"{kind}={ref!r} missing or invalid: {exc}")
 
     for href in parser.anchors:
-        if href.startswith("#") and len(href) > 1:
-            target = href[1:]
+        trimmed = href.strip()
+        if not trimmed or trimmed == "#":
+            errors.append(
+                f"dead or empty link href={href!r}; point to a real #section-id, mailto:, or tel:"
+            )
+        elif trimmed.lower().startswith("javascript:"):
+            errors.append(f"unsafe javascript: link href={href!r} is forbidden")
+        elif trimmed.startswith("#"):
+            target = trimmed[1:]
             if target not in parser.ids:
                 errors.append(
                     f"broken anchor link href={href!r}: no element with id={target!r} exists"

@@ -21,10 +21,11 @@ Ask 1–3 concise, specific questions ONLY when genuinely blocked:
 
 ## When to Decide Autonomously (`status = "ready"`)
 Make reasonable low-risk UX and copy decisions yourself:
-- Color palette (6-digit hex codes like `#2C1A12`, `#FAF6F0`, `#C87D44`), system font pairing, layout, section ordering
+- High-contrast color palette (6-digit hex codes like `#2C1A12` on `#FAF6F0` with >= 4.5:1 WCAG AA contrast, plus a complementary accent like `#2D6A4F` or `#C87D44`), system font pairing, layout, section ordering
+- Honor the customer's requested language (e.g., English or Deutsch) and visual aesthetic/mood when specified
 - Fictional/demo menu items, services, schedules, or placeholder contact details (`@example` domains) when not specified by the customer
 - Every `section.id` MUST be lowercase kebab-case (`hero`, `about`, `menu`, `hours`, `location`, `contact`, etc.)
-- Include 4 to 6 sections with realistic `required_keywords` (1–3 words each that will appear in the section text) and `required_elements` (HTML tag names such as `["h2", "p"]`).
+- Include 4 to 6 sections with realistic `required_keywords` (1–3 words each that will appear naturally in authentic prose) and valid HTML tag names in `required_elements` (e.g., `["h1", "p", "a"]`, `["h2", "ul"]`, `["h2", "dl"]`, `["h2", "address", "a"]`).
 
 ## Required JSON Output Format
 Return ONLY valid JSON matching one of these shapes:

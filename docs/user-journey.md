@@ -37,7 +37,7 @@ sequenceDiagram
   PM-->>Temporal: status = ready + WebsiteSpecification
   Temporal->>Agents: Run PydanticAI PM / Developer / Tester / Reviewer activities
   Agents->>Dev: Scaffold / edit site inside SiteSandbox
-  Agents->>Test: Execute 8 Playwright gates (1280x800 & 375x812)
+  Agents->>Test: Execute 11 Playwright & WCAG 2.1 AA gates + Visual QA (1280x800 & 375x812)
   loop Bounded repair (max 3 attempts on failures)
     Dev->>Test: Apply FailureEvidence remediation & re-verify
   end

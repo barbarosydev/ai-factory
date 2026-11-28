@@ -18,6 +18,7 @@ Use `task` for everything; logic lives in `scripts/`.
 | Command | Use |
 | --- | --- |
 | `task build` | Build `./bin/factory` |
+| `task build:local` | Build and verify a site locally with zero GitHub App setup (`-- --prompt "..."`, optional `--spec-only`, `--preview`) |
 | `task doctor` | Verify local prerequisites, `ai-factory-infra`, Keychain PEM, and `ai-factory-websites` |
 | `task run` | Start worker + poller in `review` mode |
 | `task run:auto` | Start worker + poller in `auto` mode (checks + squash merge) |
@@ -27,7 +28,7 @@ Use `task` for everything; logic lives in `scripts/`.
 | `task lint` | `gofmt`, `go vet`, `golangci-lint`, `workflowcheck`, `shellcheck`, `ruff`, `mypy`, policies, `actionlint`, doc checks |
 | `task test` | Go unit, Temporal workflow replay, Python `pytest`, sandbox escape, and worktree tests |
 | `task ci` | `task lint`, `task test`, and `gitleaks` |
-| `task eval` | Promptfoo 12-case golden dataset & red-team evaluation against local LiteLLM |
+| `task eval` | Promptfoo 16-case golden dataset & red-team evaluation against local LiteLLM |
 
 ## Hard rules
 
